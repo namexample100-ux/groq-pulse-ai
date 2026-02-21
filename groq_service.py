@@ -21,12 +21,17 @@ class GroqService:
             
         # Хранилище контекста: {user_id: [messages]}
         self.context = {}
+        # Хранилище выбранных моделей: {user_id: model_name}
+        self.user_models = {}
         self.max_context = 10  # Храним последние 10 сообщений
 
     async def get_response(self, user_id: int, user_text: str) -> str:
         """Получает ответ от нейросети с учетом контекста."""
         if not GROQ_API_KEY:
             return "❌ GROQ_API_KEY не задан в настройках."
+        
+        # Определяем модель для пользователя
+        current_model = self.user_models.get(user_id, DEFAULT_MODEL)
 
         # Инициализация контекста для нового пользователя
         if user_id not in self.context:
@@ -44,7 +49,7 @@ class GroqService:
         try:
             chat_completion = await self.client.chat.completions.create(
                 messages=self.context[user_id],
-                model=DEFAULT_MODEL,
+                model=current_model,
                 temperature=0.7,
             )
             
@@ -62,6 +67,10 @@ class GroqService:
         """Очищает историю диалога."""
         if user_id in self.context:
             del self.context[user_id]
+
+    def set_model(self, user_id: int, model_name: str):
+        """Устанавливает модель для конкретного пользователя."""
+        self.user_models[user_id] = model_name
 
 # Глобальный экземпляр
 ai = GroqService()

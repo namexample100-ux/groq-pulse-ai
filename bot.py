@@ -61,10 +61,19 @@ async def start_web_server():
 
 def main_keyboard():
     kb = [
-        [KeyboardButton(text="🧹 Очистить память")],
-        [KeyboardButton(text="ℹ️ О модели")]
+        [KeyboardButton(text="🧠 Выбор модели")],
+        [KeyboardButton(text="🧹 Очистить память"), KeyboardButton(text="ℹ️ О модели")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+def models_keyboard():
+    buttons = [
+        [InlineKeyboardButton(text="💎 Llama 3.3 70B (Smartest)", callback_data="set_model_llama-3.3-70b-versatile")],
+        [InlineKeyboardButton(text="⚡ Llama 3.1 8B (Instant)", callback_data="set_model_llama-3.1-8b-instant")],
+        [InlineKeyboardButton(text="🌀 Mixtral 8x7b (Balanced)", callback_data="set_model_mixtral-8x7b-32768")],
+        [InlineKeyboardButton(text="🐥 Gemma 2 9b (Light)", callback_data="set_model_gemma2-9b-it")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 # ── Хендлеры ────────────────────────────────────────────────────────────
 
@@ -84,8 +93,35 @@ async def clear_memory(message: Message):
 
 @router.message(F.text == "ℹ️ О модели")
 async def model_info(message: Message):
-    from config import DEFAULT_MODEL
-    await message.answer(f"🧠 Я использую модель: <code>{DEFAULT_MODEL}</code>\n⚡ Инференс через Groq LPU.")
+    from groq_service import ai
+    current_model = ai.user_models.get(message.from_user.id, "Default")
+    await message.answer(
+        f"🧠 <b>Текущая конфигурация:</b>\n\n"
+        f"• Модель: <code>{current_model}</code>\n"
+        f"• Инференс: Groq LPU (Ultra Fast)"
+    )
+
+@router.message(F.text == "🧠 Выбор модели")
+async def show_models(message: Message):
+    await message.answer(
+        "🎭 <b>Выберите модель для общения:</b>\n\n"
+        "• <b>70B</b> — самая умная, подходит для сложных задач.\n"
+        "• <b>8B / Gemma</b> — самые быстрые, идеальны для чата.\n"
+        "• <b>Mixtral</b> — отличный баланс логики и скорости.",
+        reply_markup=models_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("set_model_"))
+async def process_model_selection(callback: CallbackQuery):
+    model_name = callback.data.replace("set_model_", "")
+    ai.set_model(callback.from_user.id, model_name)
+    
+    await callback.answer(f"✅ Установлена модель {model_name}")
+    await callback.message.edit_text(
+        f"✅ <b>Модель успешно изменена!</b>\n"
+        f"Теперь я использую: <code>{model_name}</code>\n\n"
+        f"Вся память диалога сохранена."
+    )
 
 @router.message()
 async def chat_handler(message: Message):
