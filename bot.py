@@ -6,7 +6,10 @@ from aiogram import Bot, Dispatcher, Router, F, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, TelegramObject, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import (
+    Message, CallbackQuery, KeyboardButton, ReplyKeyboardMarkup,
+    InlineKeyboardButton, InlineKeyboardMarkup, TelegramObject
+)
 from aiohttp import web
 from typing import Callable, Any, Awaitable
 
