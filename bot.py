@@ -167,10 +167,27 @@ async def cmd_img(message: Message):
     except Exception as e:
         log.error(f"Image Gen Error for prompt '{prompt}': {e}", exc_info=True)
         error_msg = str(e)
-        if "530" in error_msg or "Forbidden" in error_msg:
-            await message.answer("❌ <b>Ошибка доступа (530/403).</b>\nПровайдер картинок блокирует запросы из вашего региона. Пожалуйста, **залейте изменения на Render** — там всё заработает!")
-        else:
-            await message.answer(f"⚠️ Ошибка: {error_msg}")
+        
+        # Если скачивание не удалось (блокада), пробуем отправить просто ссылку
+        # Telegram сам "развернет" (preview) картинку по ссылке
+        try:
+            log.info("⚠️ Falling back to direct URL due to download error.")
+            image_url = await image_gen.generate_image_url(prompt) # Генерируем еще раз на всякий случай
+            await message.answer(
+                f"🎨 <b>Не удалось загрузить файл, вот прямая ссылка:</b>\n"
+                f"<a href='{image_url}'>🖼 Открыть изображение</a>\n\n"
+                f"<i>(Telegram должен показать превью ниже)</i>",
+                disable_web_page_preview=False
+            )
+        except Exception as fallback_e:
+            is_render = os.getenv("RENDER") == "true"
+            if "530" in error_msg or "Forbidden" in error_msg:
+                if is_render:
+                    await message.answer(f"❌ <b>Сервис Pollinations временно недоступен (Error {error_msg}).</b>\nПопробуйте позже или используйте другой промпт.")
+                else:
+                    await message.answer("❌ <b>Ошибка доступа (530/403).</b>\nЛокальный запуск заблокирован. Пожалуйста, **залейте изменения на Render**!")
+            else:
+                await message.answer(f"⚠️ Ошибка: {error_msg}")
 
 @router.message()
 async def chat_handler(message: Message):

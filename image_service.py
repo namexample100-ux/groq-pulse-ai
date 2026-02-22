@@ -9,13 +9,12 @@ class ImageService:
         self.base_url = "https://image.pollinations.ai/prompt/"
 
     async def generate_image_url(self, prompt: str) -> str:
-        """Генерирует URL для изображения на основе промпта."""
-        # Кодируем промпт для URL
-        encoded_prompt = quote(prompt)
-        # Добавляем параметры (nologo, enhance и seed для уникальности)
+        """Генерирует URL для изображения с использованием модели Flux."""
         import random
+        encoded_prompt = quote(prompt)
         seed = random.randint(1, 1000000)
-        url = f"{self.base_url}{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true&seed={seed}"
+        # Используем современную архитектуру Flux
+        url = f"{self.base_url}{encoded_prompt}?width=1024&height=1024&nologo=true&model=flux&seed={seed}"
         return url
 
     async def download_image(self, url: str) -> bytes:
