@@ -6,15 +6,16 @@ log = logging.getLogger(__name__)
 
 class ImageService:
     def __init__(self):
-        self.base_url = "https://image.pollinations.ai/prompt/"
+        # Меняем на основной домен, он бывает стабильнее при ошибках 1033
+        self.base_url = "https://pollinations.ai/p/"
 
     async def generate_image_url(self, prompt: str) -> str:
         """Генерирует URL для изображения с использованием модели Flux."""
         import random
         encoded_prompt = quote(prompt)
         seed = random.randint(1, 1000000)
-        # Используем современную архитектуру Flux
-        url = f"{self.base_url}{encoded_prompt}?width=1024&height=1024&nologo=true&model=flux&seed={seed}"
+        # Упрощаем параметры: убираем лишнее, оставляем суть
+        url = f"{self.base_url}{encoded_prompt}?width=1024&height=1024&seed={seed}&model=flux"
         return url
 
     async def download_image(self, url: str) -> bytes:
