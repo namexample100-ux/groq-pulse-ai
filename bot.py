@@ -15,6 +15,7 @@ from typing import Callable, Any, Awaitable
 
 from config import BOT_TOKEN, ADMIN_ID
 from groq_service import ai
+import database as db
 
 # Логирование
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -91,16 +92,17 @@ async def cmd_start(message: Message):
 
 @router.message(F.text == "🧹 Очистить память")
 async def clear_memory(message: Message):
-    ai.clear_context(message.from_user.id)
+    await ai.clear_context(message.from_user.id)
     await message.answer("🧼 <b>Память диалога очищена.</b> Начнем с чистого листа!")
 
 @router.message(F.text == "ℹ️ О модели")
 async def model_info(message: Message):
-    from groq_service import ai
-    current_model = ai.user_models.get(message.from_user.id, "Default")
+    _, current_model = await db.get_user_data(message.from_user.id)
+    from config import DEFAULT_MODEL
+    model_to_show = current_model or DEFAULT_MODEL
     await message.answer(
         f"🧠 <b>Текущая конфигурация:</b>\n\n"
-        f"• Модель: <code>{current_model}</code>\n"
+        f"• Модель: <code>{model_to_show}</code>\n"
         f"• Инференс: Groq LPU (Ultra Fast)"
     )
 
@@ -117,7 +119,7 @@ async def show_models(message: Message):
 @router.callback_query(F.data.startswith("set_model_"))
 async def process_model_selection(callback: CallbackQuery):
     model_name = callback.data.replace("set_model_", "")
-    ai.set_model(callback.from_user.id, model_name)
+    await ai.set_model(callback.from_user.id, model_name)
     
     await callback.answer(f"✅ Установлена модель {model_name}")
     await callback.message.edit_text(
@@ -145,6 +147,9 @@ async def chat_handler(message: Message):
         await message.answer(response)
 
 async def main():
+    # Инициализация БД
+    await db.init_db()
+    
     # Запуск веб-сервера
     asyncio.create_task(start_web_server())
     
@@ -153,7 +158,11 @@ async def main():
     
     dp.include_router(router)
     log.info("🚀 GroqPulse запущен!")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await db.close_db()
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
