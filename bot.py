@@ -15,7 +15,9 @@ from typing import Callable, Any, Awaitable
 
 from config import BOT_TOKEN, ADMIN_ID
 from groq_service import ai
+from image_service import image_gen
 import database as db
+from aiogram.types import URLInputFile
 
 # Логирование
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -128,10 +130,37 @@ async def process_model_selection(callback: CallbackQuery):
         f"Вся память диалога сохранена."
     )
 
+@router.message(Command("img"))
+async def cmd_img(message: Message):
+    # Получаем текст после команды /img
+    prompt = message.text.replace("/img", "").strip()
+    if not prompt:
+        await message.answer("🖼 <b>Пожалуйста, введите описание картинки.</b>\nПример: <code>/img робот в космосе</code>")
+        return
+
+    await message.bot.send_chat_action(chat_id=message.chat.id, action="upload_photo")
+    
+    try:
+        image_url = await image_gen.generate_image_url(prompt)
+        await message.answer_photo(
+            photo=URLInputFile(image_url),
+            caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n🧪 <i>Сгенерировано через Pollinations AI</i>"
+        )
+    except Exception as e:
+        log.error(f"Image Gen Error: {e}")
+        await message.answer("⚠️ Произошла ошибка при генерации изображения.")
+
 @router.message()
 async def chat_handler(message: Message):
     if not message.text:
         return
+
+    # Проверка на запрос генерации картинки через текст
+    if message.text.lower().startswith(("нарисуй", "начерти", "draw")):
+        prompt = message.text.lower().replace("нарисуй", "").replace("начерти", "").replace("draw", "").strip()
+        if prompt:
+            await cmd_img(message) # Используем тот же хендлер, но с промптом
+            return
 
     # Показываем статус "печатает"
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
