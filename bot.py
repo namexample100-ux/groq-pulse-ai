@@ -8,7 +8,8 @@ from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message, CallbackQuery, KeyboardButton, ReplyKeyboardMarkup,
-    InlineKeyboardButton, InlineKeyboardMarkup, TelegramObject
+    InlineKeyboardButton, InlineKeyboardMarkup, TelegramObject,
+    BufferedInputFile
 )
 from aiohttp import web
 from typing import Callable, Any, Awaitable
@@ -17,7 +18,6 @@ from config import BOT_TOKEN, ADMIN_ID
 from groq_service import ai
 from image_service import image_gen
 import database as db
-from aiogram.types import URLInputFile
 
 # Логирование
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -141,14 +141,36 @@ async def cmd_img(message: Message):
     await message.bot.send_chat_action(chat_id=message.chat.id, action="upload_photo")
     
     try:
-        image_url = await image_gen.generate_image_url(prompt)
+        # 1. Улучшаем промпт через Groq (перевод + детализация)
+        enhanced_prompt_query = f"Translate and enhance this image description for an AI generator. Be descriptive but keep it under 30 words. Prompt: {prompt}"
+        # Используем быструю 8B модель для перевода
+        ai_prompt = await ai.client.chat.completions.create(
+            messages=[{"role": "user", "content": enhanced_prompt_query}],
+            model="llama-3.1-8b-instant",
+            temperature=0.7,
+        )
+        english_prompt = ai_prompt.choices[0].message.content.strip()
+        log.info(f"✨ Enhanced prompt: {english_prompt}")
+
+        # 2. Генерируем URL
+        image_url = await image_gen.generate_image_url(english_prompt)
+        log.info(f"🎨 Generating image for prompt: {english_prompt}")
+        
+        # 3. Скачиваем результат
+        image_bytes = await image_gen.download_image(image_url)
+        
+        # 4. Отправляем пользователю
         await message.answer_photo(
-            photo=URLInputFile(image_url),
-            caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n🧪 <i>Сгенерировано через Pollinations AI</i>"
+            photo=BufferedInputFile(image_bytes, filename="art.png"),
+            caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>AI-промпт: {english_prompt}</i>\n🧪 <i>Pollinations AI</i>"
         )
     except Exception as e:
-        log.error(f"Image Gen Error: {e}")
-        await message.answer("⚠️ Произошла ошибка при генерации изображения.")
+        log.error(f"Image Gen Error for prompt '{prompt}': {e}", exc_info=True)
+        error_msg = str(e)
+        if "530" in error_msg or "Forbidden" in error_msg:
+            await message.answer("❌ <b>Ошибка доступа (530/403).</b>\nПровайдер картинок блокирует запросы из вашего региона. Пожалуйста, **залейте изменения на Render** — там всё заработает!")
+        else:
+            await message.answer(f"⚠️ Ошибка: {error_msg}")
 
 @router.message()
 async def chat_handler(message: Message):
