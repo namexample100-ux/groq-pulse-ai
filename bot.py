@@ -152,18 +152,37 @@ async def cmd_img(message: Message):
         english_prompt = ai_prompt.choices[0].message.content.strip()
         log.info(f"✨ Enhanced prompt: {english_prompt}")
 
-        # 2. Генерируем URL
-        image_url = await image_gen.generate_image_url(english_prompt)
-        log.info(f"🎨 Generating image for prompt: {english_prompt}")
-        
-        # 3. Скачиваем результат
-        image_bytes = await image_gen.download_image(image_url)
-        
-        # 4. Отправляем пользователю
-        await message.answer_photo(
-            photo=BufferedInputFile(image_bytes, filename="art.png"),
-            caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>AI-промпт: {english_prompt}</i>\n🧪 <i>Pollinations AI</i>"
-        )
+        # 2. Генерируем картинку (Провайдер 1: Pollinations)
+        try:
+            image_url = await image_gen.generate_image_url(english_prompt, provider="pollinations")
+            log.info(f"🎨 Trying Pollinations for prompt: {english_prompt}")
+            image_bytes = await image_gen.download_image(image_url)
+            
+            await message.answer_photo(
+                photo=BufferedInputFile(image_bytes, filename="art.png"),
+                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: Flux (Pollinations)</i>"
+            )
+            return
+        except Exception as e:
+            log.warn(f"⚠️ Провайдер Pollinations недоступен: {e}. Пробую запасной вариант...")
+
+        # 3. Генерируем картинку (Провайдер 2: Airforce)
+        try:
+            image_url = await image_gen.generate_image_url(english_prompt, provider="airforce")
+            log.info(f"🎨 Trying Airforce for prompt: {english_prompt}")
+            image_bytes = await image_gen.download_image(image_url)
+            
+            await message.answer_photo(
+                photo=BufferedInputFile(image_bytes, filename="art.png"),
+                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: Flux (Airforce)</i>"
+            )
+        except Exception as e:
+            log.error(f"❌ Оба провайдера не справились: {e}")
+            await message.answer(
+                f"❌ <b>К сожалению, все сервисы генерации сейчас перегружены.</b>\n"
+                f"Попробуйте позже или используйте другой запрос.\n\n"
+                f"<i>(Ошибка: {str(e)})</i>"
+            )
     except Exception as e:
         log.error(f"Image Gen Error for prompt '{prompt}': {e}", exc_info=True)
         error_msg = str(e)

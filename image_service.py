@@ -6,17 +6,23 @@ log = logging.getLogger(__name__)
 
 class ImageService:
     def __init__(self):
-        # Меняем на основной домен, он бывает стабильнее при ошибках 1033
-        self.base_url = "https://pollinations.ai/p/"
+        # Основной провайдер
+        self.pollinations_url = "https://pollinations.ai/p/"
+        # Запасной провайдер (Airforce AI)
+        self.airforce_url = "https://api.airforce/imagine2?prompt="
 
-    async def generate_image_url(self, prompt: str) -> str:
-        """Генерирует URL для изображения с использованием модели Flux."""
-        import random
+    async def generate_image_url(self, prompt: str, provider: str = "pollinations") -> str:
+        """Генерирует URL для изображения."""
         encoded_prompt = quote(prompt)
+        import random
         seed = random.randint(1, 1000000)
-        # Упрощаем параметры: убираем лишнее, оставляем суть
-        url = f"{self.base_url}{encoded_prompt}?width=1024&height=1024&seed={seed}&model=flux"
-        return url
+        
+        if provider == "airforce":
+            # Airforce AI (Stable Diffusion/Flux)
+            return f"{self.airforce_url}{encoded_prompt}&model=flux&width=1024&height=1024&seed={seed}"
+        else:
+            # Pollinations AI (Primary)
+            return f"{self.pollinations_url}{encoded_prompt}?width=1024&height=1024&seed={seed}&model=flux"
 
     async def download_image(self, url: str) -> bytes:
         """Скачивает изображение по URL и возвращает байты (с эмуляцией браузера)."""
