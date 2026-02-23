@@ -183,7 +183,7 @@ class GroqService:
         try:
             response = await self.client.chat.completions.create(
                 messages=temp_history,
-                model="llama-3.2-11b-vision-preview",
+                model="llama-3.2-90b-vision-preview",
             )
             ai_response = response.choices[0].message.content
             
