@@ -87,7 +87,21 @@ class GroqService:
 
             # Если ИИ решил использовать поиск
             if tool_calls:
-                history.append(response_message)
+                # Превращаем сообщение со звонками в словарь для сохранения
+                history.append({
+                    "role": "assistant",
+                    "content": response_message.content,
+                    "tool_calls": [
+                        {
+                            "id": tool.id,
+                            "type": "function",
+                            "function": {
+                                "name": tool.function.name,
+                                "arguments": tool.function.arguments
+                            }
+                        } for tool in tool_calls
+                    ]
+                })
                 
                 for tool_call in tool_calls:
                     function_name = tool_call.function.name
@@ -117,7 +131,7 @@ class GroqService:
             else:
                 ai_response = response_message.content
 
-            # Обновляем историю в памяти и БД
+            # Обновляем историю в памяти и БД (превращаем в дикт)
             history.append({"role": "assistant", "content": ai_response})
             await db.save_user_data(user_id, history)
             

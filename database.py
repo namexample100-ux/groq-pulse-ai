@@ -22,7 +22,8 @@ async def init_db():
             DATABASE_URL, 
             ssl='require', 
             min_size=2, 
-            max_size=10
+            max_size=10,
+            statement_cache_size=0 # Нужно для работы с PgBouncer (Supabase)
         )
         log.info("🐘 Пул подключений к БД (Supabase) создан.")
         
