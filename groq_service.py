@@ -1,11 +1,34 @@
 import os
 import logging
 import httpx
+import json
 from groq import AsyncGroq
 from config import GROQ_API_KEY, DEFAULT_MODEL
 import database as db
+from search_service import search_tool
 
 log = logging.getLogger(__name__)
+
+# Определение инструментов (Tools) для агента
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web",
+            "description": "Search the internet for real-time information, news, facts, current events, weather, and specific data not present in your training data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    }
+]
 
 class GroqService:
     def __init__(self):
@@ -17,58 +40,99 @@ class GroqService:
         else:
             self.client = AsyncGroq(api_key=GROQ_API_KEY)
             
-        self.max_context = 10  # Храним последние 10 сообщений
+        self.max_context = 10
 
     async def get_response(self, user_id: int, user_text: str) -> str:
-        """Получает ответ от нейросети с учетом истории из БД."""
+        """Получает ответ от ИИ-агента с поддержкой инструментов (поиск)."""
         if not GROQ_API_KEY:
             return "❌ GROQ_API_KEY не задан в настройках."
         
-        # Загружаем историю и модель из БД
         history, user_model = await db.get_user_data(user_id)
         current_model = user_model or DEFAULT_MODEL
 
-        # Если истории нет, добавляем системный промпт
-        if not history:
-            history = [
-                {"role": "system", "content": "You are a helpful assistant. Answer in the language the user speaks to you."}
-            ]
+        # Системный промпт для Агента
+        system_prompt = {
+            "role": "system", 
+            "content": (
+                "You are GroqPulse, an advanced AI Agent. You have access to real-time web search. "
+                "If the user asks about current events, news, or something you are not sure about, "
+                "use the 'search_web' tool. Always answer in the language the user speaks to you."
+            )
+        }
 
-        # Добавляем сообщение пользователя
+        if not history:
+            history = [system_prompt]
+        else:
+            # Убеждаемся, что системный промпт всегда актуальный
+            history[0] = system_prompt
+
         history.append({"role": "user", "content": user_text})
 
-        # Обрезаем контекст (системный промпт + последние N сообщений)
+        # Ограничение контекста
         if len(history) > self.max_context + 1:
             history = [history[0]] + history[-self.max_context:]
 
         try:
-            chat_completion = await self.client.chat.completions.create(
+            # ПЕРВЫЙ ЗАПРОС: Может содержать вызов инструмента
+            response = await self.client.chat.completions.create(
                 messages=history,
                 model=current_model,
+                tools=TOOLS,
+                tool_choice="auto",
                 temperature=0.7,
             )
             
-            ai_response = chat_completion.choices[0].message.content
+            response_message = response.choices[0].message
+            tool_calls = response_message.tool_calls
+
+            # Если ИИ решил использовать поиск
+            if tool_calls:
+                history.append(response_message)
+                
+                for tool_call in tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+                    
+                    if function_name == "search_web":
+                        query = function_args.get("query")
+                        log.info(f"🔍 Агент ищет в сети: {query}")
+                        
+                        # Выполняем поиск
+                        search_result = await search_tool.search(query)
+                        
+                        # Добавляем результат поиска в историю
+                        history.append({
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "name": function_name,
+                            "content": search_result,
+                        })
+
+                # ВТОРОЙ ЗАПРОС: Получаем финальный ответ на основе данных поиска
+                second_response = await self.client.chat.completions.create(
+                    messages=history,
+                    model=current_model,
+                )
+                ai_response = second_response.choices[0].message.content
+            else:
+                ai_response = response_message.content
+
+            # Обновляем историю в памяти и БД
             history.append({"role": "assistant", "content": ai_response})
-            
-            # Сохраняем обновленную историю в БД
             await db.save_user_data(user_id, history)
             
             return ai_response
             
         except Exception as e:
-            log.error(f"Groq API Error: {e}")
+            log.error(f"Groq Agent Error: {e}", exc_info=True)
             if "Forbidden" in str(e) or "Access denied" in str(e):
                 return "❌ **Ошибка доступа (403).**\nGroq блокирует запросы из вашего региона."
-            return f"⚠️ Ошибка нейросети: {str(e)}"
+            return f"⚠️ Ошибка ИИ-агента: {str(e)}"
 
     async def clear_context(self, user_id: int):
-        """Очищает историю диалога в БД."""
         await db.clear_user_history(user_id)
 
     async def set_model(self, user_id: int, model_name: str):
-        """Устанавливает модель для пользователя в БД."""
-        # Получаем текущую историю, чтобы сохранить её при смене модели
         history, _ = await db.get_user_data(user_id)
         await db.save_user_data(user_id, history or [], model_name)
 

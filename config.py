@@ -16,3 +16,6 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # Hugging Face (Image Gen)
 HF_TOKEN = os.getenv("HF_TOKEN", "")
+
+# Tavily (Web Search)
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
