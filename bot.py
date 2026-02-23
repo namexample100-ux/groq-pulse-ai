@@ -143,7 +143,6 @@ async def cmd_img(message: Message):
     try:
         # 1. Улучшаем промпт через Groq (перевод + детализация)
         enhanced_prompt_query = f"Translate and enhance this image description for an AI generator. Be descriptive but keep it under 30 words. Prompt: {prompt}"
-        # Используем быструю 8B модель для перевода
         ai_prompt = await ai.client.chat.completions.create(
             messages=[{"role": "user", "content": enhanced_prompt_query}],
             model="llama-3.1-8b-instant",
@@ -152,75 +151,22 @@ async def cmd_img(message: Message):
         english_prompt = ai_prompt.choices[0].message.content.strip()
         log.info(f"✨ Enhanced prompt: {english_prompt}")
 
-        # 2. Провайдер 1: Hugging Face (Самый стабильный и качественный)
-        try:
-            log.info(f"🎨 Trying Hugging Face for: {english_prompt}")
-            image_bytes = await image_gen.generate_hf_image(english_prompt)
-            await message.answer_photo(
-                photo=BufferedInputFile(image_bytes, filename="art.png"),
-                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: FLUX.1 (Hugging Face)</i>"
-            )
-            return
-        except Exception as e:
-            if "HF_TOKEN" in str(e):
-                log.warning("⚠️ HF_TOKEN отсутствует, пропускаю основной провайдер.")
-            elif "wait" in str(e).lower():
-                await message.answer("⏳ <b>Модель Hugging Face прогревается.</b>\nПробую запасные варианты...")
-            else:
-                log.warning(f"⚠️ Hugging Face недоступен: {e}. Пробую запасные варианты...")
-
-        # 3. Провайдер 2: Pollinations
-        try:
-            log.info(f"🎨 Trying Pollinations as fallback for: {english_prompt}")
-            image_url = await image_gen.generate_image_url(english_prompt, provider="pollinations")
-            image_bytes = await image_gen.download_image(image_url)
-            await message.answer_photo(
-                photo=BufferedInputFile(image_bytes, filename="art.png"),
-                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: Flux (Pollinations - Запасной)</i>"
-            )
-            return
-        except Exception as e:
-            log.warning(f"⚠️ Pollinations недоступен: {e}. Пробую Airforce...")
-
-        # 4. Провайдер 3: Airforce
-        try:
-            log.info(f"🎨 Trying Airforce as last resort for: {english_prompt}")
-            image_url = await image_gen.generate_image_url(english_prompt, provider="airforce")
-            image_bytes = await image_gen.download_image(image_url)
-            await message.answer_photo(
-                photo=BufferedInputFile(image_bytes, filename="art.png"),
-                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: Flux (Airforce - Запасной)</i>"
-            )
-        except Exception as e:
-            log.error(f"❌ Все провайдеры провалились: {e}")
-            await message.answer(
-                f"❌ <b>К сожалению, все сервисы генерации сейчас недоступны.</b>\n"
-                f"Попробуйте позже или введите другой запрос."
-            )
-    except Exception as e:
-        log.error(f"Image Gen Error for prompt '{prompt}': {e}", exc_info=True)
-        error_msg = str(e)
+        # 2. Генерируем картинку через Hugging Face
+        image_bytes = await image_gen.generate_image(english_prompt)
         
-        # Если скачивание не удалось (блокада), пробуем отправить просто ссылку
-        # Telegram сам "развернет" (preview) картинку по ссылке
-        try:
-            log.info("⚠️ Falling back to direct URL due to download error.")
-            image_url = await image_gen.generate_image_url(prompt) # Генерируем еще раз на всякий случай
-            await message.answer(
-                f"🎨 <b>Не удалось загрузить файл, вот прямая ссылка:</b>\n"
-                f"<a href='{image_url}'>🖼 Открыть изображение</a>\n\n"
-                f"<i>(Telegram должен показать превью ниже)</i>",
-                disable_web_page_preview=False
-            )
-        except Exception as fallback_e:
-            is_render = os.getenv("RENDER") == "true"
-            if "530" in error_msg or "Forbidden" in error_msg:
-                if is_render:
-                    await message.answer(f"❌ <b>Сервис Pollinations временно недоступен (Error {error_msg}).</b>\nПопробуйте позже или используйте другой промпт.")
-                else:
-                    await message.answer("❌ <b>Ошибка доступа (530/403).</b>\nЛокальный запуск заблокирован. Пожалуйста, **залейте изменения на Render**!")
-            else:
-                await message.answer(f"⚠️ Ошибка: {error_msg}")
+        await message.answer_photo(
+            photo=BufferedInputFile(image_bytes, filename="art.png"),
+            caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: FLUX.1 (Hugging Face)</i>"
+        )
+    except Exception as e:
+        log.error(f"Image Gen Error: {e}", exc_info=True)
+        error_msg = str(e)
+        if "HF_TOKEN" in error_msg:
+            await message.answer("❌ <b>Ошибка: Отсутствует токен Hugging Face.</b>\nПожалуйста, добавьте <code>HF_TOKEN</code> в настройки бота.")
+        elif "wait" in error_msg.lower():
+            await message.answer("⏳ <b>Модель прогревается.</b>\nПожалуйста, попробуйте еще раз через несколько секунд.")
+        else:
+            await message.answer(f"⚠️ <b>Произошла ошибка:</b>\n<code>{error_msg}</code>")
 
 @router.message()
 async def chat_handler(message: Message):
