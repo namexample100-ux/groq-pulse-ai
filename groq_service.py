@@ -56,7 +56,8 @@ class GroqService:
             "content": (
                 "You are GroqPulse, an advanced AI Agent. You have access to real-time web search. "
                 "If the user asks about current events, news, or something you are not sure about, "
-                "use the 'search_web' tool. Always answer in the language the user speaks to you."
+                "use the 'search_web' tool. Always answer in the language the user speaks to you. "
+                "CRITICAL: When using search results, ALWAYS provide clickable links (URLs) to the sources at the end of your response."
             )
         }
 
