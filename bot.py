@@ -173,6 +173,31 @@ async def cmd_img(message: Message):
         else:
             await message.answer(f"⚠️ <b>Произошла ошибка:</b>\n<code>{error_msg}</code>")
 
+@router.message(F.photo)
+async def handle_photo(message: Message):
+    """Обработка входящих фотографий (Зрение)."""
+    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    
+    try:
+        # Получаем фото самого высокого качества
+        photo = message.photo[-1]
+        
+        # Скачиваем фото в память
+        file = await message.bot.get_file(photo.file_id)
+        image_bytes = await message.bot.download_file(file.file_path)
+        
+        # Передаем в ИИ-зрение
+        response = await ai.get_vision_response(
+            user_id=message.from_user.id,
+            image_bytes=image_bytes.read(),
+            caption=message.caption
+        )
+        
+        await message.answer(response)
+    except Exception as e:
+        log.error(f"Vision Handler Error: {e}", exc_info=True)
+        await message.answer(f"⚠️ Ошибка при обработке фото: {str(e)}")
+
 @router.message()
 async def chat_handler(message: Message):
     if not message.text:

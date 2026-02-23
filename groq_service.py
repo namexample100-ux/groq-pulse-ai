@@ -2,6 +2,7 @@ import os
 import logging
 import httpx
 import json
+import base64
 from groq import AsyncGroq
 from config import GROQ_API_KEY, DEFAULT_MODEL
 import database as db
@@ -146,6 +147,55 @@ class GroqService:
 
     async def clear_context(self, user_id: int):
         await db.clear_user_history(user_id)
+
+    async def get_vision_response(self, user_id: int, image_bytes: bytes, caption: str = None) -> str:
+        """Анализирует изображение через Llama 3.2 Vision."""
+        if not GROQ_API_KEY:
+            return "❌ GROQ_API_KEY не задан."
+
+        # Превращаем картинку в base64
+        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+        
+        # Получаем контекст, чтобы бот помнил, о чем говорили раньше
+        history, _ = await db.get_user_data(user_id)
+        if not history:
+            history = [{"role": "system", "content": "You are GroqPulse, a helpful AI with vision capabilities. Describe images accurately and answer questions about them."}]
+
+        prompt = caption or "Опиши, что ты видишь на этом изображении?"
+        
+        # Формируем сообщение с картинкой
+        vision_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}",
+                    },
+                },
+            ],
+        }
+
+        # Добавляем в историю (но не храним саму тяжелую картинку в БД, только текст)
+        temp_history = history + [vision_message]
+
+        try:
+            response = await self.client.chat.completions.create(
+                messages=temp_history,
+                model="llama-3.2-11b-vision-preview",
+            )
+            ai_response = response.choices[0].message.content
+            
+            # Сохраняем в историю только текст (без картинки, чтобы не раздувать БД)
+            history.append({"role": "user", "content": f"[Фото]: {prompt}"})
+            history.append({"role": "assistant", "content": ai_response})
+            await db.save_user_data(user_id, history)
+            
+            return ai_response
+        except Exception as e:
+            log.error(f"Vision Error: {e}")
+            return f"⚠️ Ошибка при анализе фото: {str(e)}"
 
     async def set_model(self, user_id: int, model_name: str):
         history, _ = await db.get_user_data(user_id)
