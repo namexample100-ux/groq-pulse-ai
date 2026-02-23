@@ -98,13 +98,26 @@ class GroqService:
             history = [history[0]] + history[-self.max_context:]
 
         try:
-            response = await self.client.chat.completions.create(
-                messages=history,
-                model=current_model,
-                tools=TOOLS,
-                tool_choice="auto",
-                temperature=0.7,
-            )
+            try:
+                response = await self.client.chat.completions.create(
+                    messages=history,
+                    model=current_model,
+                    tools=TOOLS,
+                    tool_choice="auto",
+                    temperature=0.7,
+                )
+            except Exception as e:
+                if "rate_limit_exceeded" in str(e).lower() and current_model != "llama-3.1-8b-instant":
+                    log.warning(f"⚠️ Лимит {current_model} исчерпан. Переключаюсь на 8b-instant...")
+                    response = await self.client.chat.completions.create(
+                        messages=history,
+                        model="llama-3.1-8b-instant",
+                        tools=TOOLS,
+                        tool_choice="auto",
+                        temperature=0.7,
+                    )
+                else:
+                    raise e
             
             response_message = response.choices[0].message
             tool_calls = response_message.tool_calls
@@ -158,10 +171,20 @@ class GroqService:
                         "content": tool_content,
                     })
 
-                second_response = await self.client.chat.completions.create(
-                    messages=history,
-                    model=current_model,
-                )
+                # Второй запрос тоже с фоллбэком
+                try:
+                    second_response = await self.client.chat.completions.create(
+                        messages=history,
+                        model=current_model,
+                    )
+                except Exception as e:
+                    if "rate_limit_exceeded" in str(e).lower() and current_model != "llama-3.1-8b-instant":
+                        second_response = await self.client.chat.completions.create(
+                            messages=history,
+                            model="llama-3.1-8b-instant",
+                        )
+                    else:
+                        raise e
                 ai_response = second_response.choices[0].message.content
             else:
                 ai_response = response_message.content
@@ -172,8 +195,11 @@ class GroqService:
             
         except Exception as e:
             log.error(f"Groq Agent Error: {e}", exc_info=True)
-            if "Forbidden" in str(e) or "Access denied" in str(e):
+            err_str = str(e).lower()
+            if "forbidden" in err_str or "access denied" in err_str:
                 return "❌ **Ошибка доступа (403).**\nGroq блокирует запросы из вашего региона."
+            if "rate_limit_exceeded" in err_str:
+                return "🚨 **Лимит запросов исчерпан.**\nВсе доступные модели Groq сейчас перегружены. Пожалуйста, подождите 15-20 минут."
             return f"⚠️ Ошибка ИИ-агента: {str(e)}"
 
     async def clear_context(self, user_id: int):
@@ -246,10 +272,21 @@ class GroqService:
         history.append({"role": "system", "content": doc_info})
 
         try:
-            response = await self.client.chat.completions.create(
-                messages=history,
-                model="llama-3.3-70b-versatile", # Для документов берем самую умную модель
-            )
+            try:
+                response = await self.client.chat.completions.create(
+                    messages=history,
+                    model="llama-3.3-70b-versatile", # Для документов берем самую умную модель
+                )
+            except Exception as e:
+                if "rate_limit_exceeded" in str(e).lower():
+                    # Фоллбэк на более легкую модель
+                    response = await self.client.chat.completions.create(
+                        messages=history,
+                        model="llama-3.1-8b-instant",
+                    )
+                else:
+                    raise e
+            
             ai_response = response.choices[0].message.content
             
             # Сохраняем в историю подтверждение прочтения
