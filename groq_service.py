@@ -197,6 +197,39 @@ class GroqService:
             log.error(f"Vision Error: {e}")
             return f"⚠️ Ошибка при анализе фото: {str(e)}"
 
+    async def get_doc_response(self, user_id: int, doc_text: str, file_name: str) -> str:
+        """Обрабатывает контент из документа."""
+        if not GROQ_API_KEY:
+            return "❌ GROQ_API_KEY не задан."
+
+        history, _ = await db.get_user_data(user_id)
+        
+        # Системная вставка про документ
+        doc_info = f"Пользователь прислал документ: {file_name}.\n\nСодержимое документа:\n\"\"\"\n{doc_text}\n\"\"\"\n\nПроанализируй этот текст и приготовься отвечать на вопросы по нему. Если текст слишком длинный, сфокусируйся на главных тезах."
+        
+        if not history:
+            history = [{"role": "system", "content": "You are GroqPulse, a helpful AI. You can analyze documents. Answer in the language of the user."}]
+
+        # Добавляем инфу о документе в ИИ (через системное сообщение или user-вставку)
+        history.append({"role": "user", "content": f"Я загрузил файл '{file_name}'. Прочитай его."})
+        history.append({"role": "system", "content": doc_info})
+
+        try:
+            response = await self.client.chat.completions.create(
+                messages=history,
+                model="llama-3.3-70b-versatile", # Для документов берем самую умную модель
+            )
+            ai_response = response.choices[0].message.content
+            
+            # Сохраняем в историю подтверждение прочтения
+            history.append({"role": "assistant", "content": ai_response})
+            await db.save_user_data(user_id, history)
+            
+            return ai_response
+        except Exception as e:
+            log.error(f"Doc Analysis Error: {e}")
+            return f"⚠️ Ошибка при анализе документа: {str(e)}"
+
     async def set_model(self, user_id: int, model_name: str):
         history, _ = await db.get_user_data(user_id)
         await db.save_user_data(user_id, history or [], model_name)

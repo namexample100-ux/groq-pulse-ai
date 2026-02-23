@@ -9,14 +9,17 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message, CallbackQuery, KeyboardButton, ReplyKeyboardMarkup,
     InlineKeyboardButton, InlineKeyboardMarkup, TelegramObject,
-    BufferedInputFile
+    BufferedInputFile, InputFile
 )
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+import io
 from aiohttp import web
 from typing import Callable, Any, Awaitable
 
 from config import BOT_TOKEN, ADMIN_ID
 from groq_service import ai
 from image_service import image_gen
+from doc_service import doc_tool
 import database as db
 
 # Логирование
@@ -197,6 +200,41 @@ async def handle_photo(message: Message):
     except Exception as e:
         log.error(f"Vision Handler Error: {e}", exc_info=True)
         await message.answer(f"⚠️ Ошибка при обработке фото: {str(e)}")
+
+@router.message(F.document)
+async def handle_document(message: Message):
+    """Обработка входящих документов (PDF/TXT)."""
+    file_name = message.document.file_name
+    if not (file_name.lower().endswith('.pdf') or file_name.lower().endswith('.txt')):
+        await message.answer("❌ Я пока умею читать только <b>PDF</b> и <b>TXT</b> файлы.")
+        return
+
+    wait_msg = await message.answer(f"⏳ Читаю документ <code>{file_name}</code>...")
+    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    
+    try:
+        # Скачиваем файл
+        file = await message.bot.get_file(message.document.file_id)
+        file_bytes = await message.bot.download_file(file.file_path)
+        
+        # Извлекаем текст
+        doc_text = await doc_tool.get_document_content(file_bytes.read(), file_name)
+        
+        if doc_text.startswith("⚠️") or doc_text.startswith("❌"):
+            await wait_msg.edit_text(doc_text)
+            return
+
+        # Отправляем в ИИ для анализа
+        response = await ai.get_doc_response(
+            user_id=message.from_user.id,
+            doc_text=doc_text,
+            file_name=file_name
+        )
+        
+        await wait_msg.edit_text(response)
+    except Exception as e:
+        log.error(f"Doc Handler Error: {e}", exc_info=True)
+        await wait_msg.edit_text(f"⚠️ Ошибка при чтении файла: {str(e)}")
 
 @router.message()
 async def chat_handler(message: Message):
