@@ -13,3 +13,6 @@ DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "llama-3.3-70b-versatile")
 
 # Database (Supabase)
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# Hugging Face (Image Gen)
+HF_TOKEN = os.getenv("HF_TOKEN", "")

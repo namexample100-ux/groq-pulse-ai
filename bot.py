@@ -152,36 +152,50 @@ async def cmd_img(message: Message):
         english_prompt = ai_prompt.choices[0].message.content.strip()
         log.info(f"✨ Enhanced prompt: {english_prompt}")
 
-        # 2. Генерируем картинку (Провайдер 1: Pollinations)
+        # 2. Провайдер 1: Hugging Face (Самый стабильный и качественный)
         try:
-            image_url = await image_gen.generate_image_url(english_prompt, provider="pollinations")
-            log.info(f"🎨 Trying Pollinations for prompt: {english_prompt}")
-            image_bytes = await image_gen.download_image(image_url)
-            
+            log.info(f"🎨 Trying Hugging Face for: {english_prompt}")
+            image_bytes = await image_gen.generate_hf_image(english_prompt)
             await message.answer_photo(
                 photo=BufferedInputFile(image_bytes, filename="art.png"),
-                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: Flux (Pollinations)</i>"
+                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: FLUX.1 (Hugging Face)</i>"
             )
             return
         except Exception as e:
-            log.warn(f"⚠️ Провайдер Pollinations недоступен: {e}. Пробую запасной вариант...")
+            if "HF_TOKEN" in str(e):
+                log.warning("⚠️ HF_TOKEN отсутствует, пропускаю основной провайдер.")
+            elif "wait" in str(e).lower():
+                await message.answer("⏳ <b>Модель Hugging Face прогревается.</b>\nПробую запасные варианты...")
+            else:
+                log.warning(f"⚠️ Hugging Face недоступен: {e}. Пробую запасные варианты...")
 
-        # 3. Генерируем картинку (Провайдер 2: Airforce)
+        # 3. Провайдер 2: Pollinations
         try:
-            image_url = await image_gen.generate_image_url(english_prompt, provider="airforce")
-            log.info(f"🎨 Trying Airforce for prompt: {english_prompt}")
+            log.info(f"🎨 Trying Pollinations as fallback for: {english_prompt}")
+            image_url = await image_gen.generate_image_url(english_prompt, provider="pollinations")
             image_bytes = await image_gen.download_image(image_url)
-            
             await message.answer_photo(
                 photo=BufferedInputFile(image_bytes, filename="art.png"),
-                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: Flux (Airforce)</i>"
+                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: Flux (Pollinations - Запасной)</i>"
+            )
+            return
+        except Exception as e:
+            log.warning(f"⚠️ Pollinations недоступен: {e}. Пробую Airforce...")
+
+        # 4. Провайдер 3: Airforce
+        try:
+            log.info(f"🎨 Trying Airforce as last resort for: {english_prompt}")
+            image_url = await image_gen.generate_image_url(english_prompt, provider="airforce")
+            image_bytes = await image_gen.download_image(image_url)
+            await message.answer_photo(
+                photo=BufferedInputFile(image_bytes, filename="art.png"),
+                caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: Flux (Airforce - Запасной)</i>"
             )
         except Exception as e:
-            log.error(f"❌ Оба провайдера не справились: {e}")
+            log.error(f"❌ Все провайдеры провалились: {e}")
             await message.answer(
-                f"❌ <b>К сожалению, все сервисы генерации сейчас перегружены.</b>\n"
-                f"Попробуйте позже или используйте другой запрос.\n\n"
-                f"<i>(Ошибка: {str(e)})</i>"
+                f"❌ <b>К сожалению, все сервисы генерации сейчас недоступны.</b>\n"
+                f"Попробуйте позже или введите другой запрос."
             )
     except Exception as e:
         log.error(f"Image Gen Error for prompt '{prompt}': {e}", exc_info=True)
