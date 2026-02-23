@@ -141,15 +141,20 @@ async def cmd_img(message: Message):
     await message.bot.send_chat_action(chat_id=message.chat.id, action="upload_photo")
     
     try:
-        # 1. Улучшаем промпт через Groq (перевод + детализация)
-        enhanced_prompt_query = f"Translate and enhance this image description for an AI generator. Be descriptive but keep it under 30 words. Prompt: {prompt}"
-        ai_prompt = await ai.client.chat.completions.create(
-            messages=[{"role": "user", "content": enhanced_prompt_query}],
-            model="llama-3.1-8b-instant",
-            temperature=0.7,
-        )
-        english_prompt = ai_prompt.choices[0].message.content.strip()
-        log.info(f"✨ Enhanced prompt: {english_prompt}")
+        # 1. Улучшаем промпт через Groq (если он доступен)
+        english_prompt = prompt # По умолчанию используем оригинал
+        try:
+            enhanced_prompt_query = f"Translate and enhance this image description for an AI generator. Be descriptive but keep it under 30 words. Prompt: {prompt}"
+            ai_prompt = await ai.client.chat.completions.create(
+                messages=[{"role": "user", "content": enhanced_prompt_query}],
+                model="llama-3.1-8b-instant",
+                temperature=0.7,
+            )
+            english_prompt = ai_prompt.choices[0].message.content.strip()
+            log.info(f"✨ Enhanced prompt: {english_prompt}")
+        except Exception as groq_err:
+            log.warning(f"⚠️ Не удалось улучшить промпт через Groq (вероятно, блок): {groq_err}")
+            # Продолжаем с оригинальным промптом
 
         # 2. Генерируем картинку через Hugging Face
         image_bytes = await image_gen.generate_image(english_prompt)
