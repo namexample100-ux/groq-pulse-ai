@@ -8,7 +8,7 @@ class ImageService:
     def __init__(self):
         # Модель Hugging Face (профессиональный стандарт)
         self.hf_model = "black-forest-labs/FLUX.1-schnell"
-        self.hf_api_url = f"https://api-inference.huggingface.co/models/{self.hf_model}"
+        self.hf_api_url = f"https://router.huggingface.co/models/{self.hf_model}"
 
     async def generate_image(self, prompt: str) -> bytes:
         """Генерирует изображение через Hugging Face Inference API."""
