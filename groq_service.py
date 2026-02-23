@@ -3,6 +3,7 @@ import logging
 import httpx
 import json
 import base64
+import datetime
 from groq import AsyncGroq
 from config import GROQ_API_KEY, DEFAULT_MODEL
 import database as db
@@ -16,16 +17,38 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search the internet for real-time information, news, facts, current events, weather, and specific data not present in your training data.",
+            "description": "Search the internet for real-time information, news, facts, and events.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query."
-                    }
+                    "query": {"type": "string", "description": "The search query."}
                 },
                 "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_time",
+            "description": "Get the current date and time.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_math",
+            "description": "Perform complex mathematical calculations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {"type": "string", "description": "The math expression to evaluate (e.g., '2 + 2 * 5')."}
+                },
+                "required": ["expression"]
             }
         }
     }
@@ -44,7 +67,7 @@ class GroqService:
         self.max_context = 10
 
     async def get_response(self, user_id: int, user_text: str) -> str:
-        """Получает ответ от ИИ-агента с поддержкой инструментов (поиск)."""
+        """Получает ответ от ИИ-агента с поддержкой инструментов."""
         if not GROQ_API_KEY:
             return "❌ GROQ_API_KEY не задан в настройках."
         
@@ -55,27 +78,26 @@ class GroqService:
         system_prompt = {
             "role": "system", 
             "content": (
-                "You are GroqPulse, an advanced AI Agent. You have access to real-time web search. "
-                "If the user asks about current events, news, or something you are not sure about, "
-                "use the 'search_web' tool. Always answer in the language the user speaks to you. "
-                "CRITICAL: When using search results, ALWAYS provide clickable links (URLs) to the sources at the end of your response."
+                "You are GroqPulse, an advanced AI Agent. You have access to real-time tools. "
+                "1. If the user asks about current events, use 'search_web'. "
+                "2. If the user asks for time/date, use 'get_current_time'. "
+                "3. For complex math, use 'calculate_math'. "
+                "Always answer in the language the user speaks to you. "
+                "CRITICAL: When using search results, ALWAYS provide clickable links (URLs) to the sources."
             )
         }
 
         if not history:
             history = [system_prompt]
         else:
-            # Убеждаемся, что системный промпт всегда актуальный
             history[0] = system_prompt
 
         history.append({"role": "user", "content": user_text})
 
-        # Ограничение контекста
         if len(history) > self.max_context + 1:
             history = [history[0]] + history[-self.max_context:]
 
         try:
-            # ПЕРВЫЙ ЗАПРОС: Может содержать вызов инструмента
             response = await self.client.chat.completions.create(
                 messages=history,
                 model=current_model,
@@ -87,9 +109,7 @@ class GroqService:
             response_message = response.choices[0].message
             tool_calls = response_message.tool_calls
 
-            # Если ИИ решил использовать поиск
             if tool_calls:
-                # Превращаем сообщение со звонками в словарь для сохранения
                 history.append({
                     "role": "assistant",
                     "content": response_message.content,
@@ -108,23 +128,36 @@ class GroqService:
                 for tool_call in tool_calls:
                     function_name = tool_call.function.name
                     function_args = json.loads(tool_call.function.arguments)
-                    
+                    tool_content = ""
+
                     if function_name == "search_web":
                         query = function_args.get("query")
                         log.info(f"🔍 Агент ищет в сети: {query}")
-                        
-                        # Выполняем поиск
-                        search_result = await search_tool.search(query)
-                        
-                        # Добавляем результат поиска в историю
-                        history.append({
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "name": function_name,
-                            "content": search_result,
-                        })
+                        tool_content = await search_tool.search(query)
+                    
+                    elif function_name == "get_current_time":
+                        now = datetime.datetime.now()
+                        tool_content = f"Текущее время и дата: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+                        log.info(f"🕒 Агент запрашивает время")
 
-                # ВТОРОЙ ЗАПРОС: Получаем финальный ответ на основе данных поиска
+                    elif function_name == "calculate_math":
+                        expr = function_args.get("expression")
+                        try:
+                            # Простая и безопасная оценка (для демки)
+                            # В проде лучше использовать специализированную либу
+                            result = eval(expr, {"__builtins__": None}, {})
+                            tool_content = f"Результат вычисления '{expr}': {result}"
+                        except Exception as math_err:
+                            tool_content = f"Ошибка вычисления: {math_err}"
+                        log.info(f"🔢 Агент считает: {expr}")
+                    
+                    history.append({
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": tool_content,
+                    })
+
                 second_response = await self.client.chat.completions.create(
                     messages=history,
                     model=current_model,
@@ -133,10 +166,8 @@ class GroqService:
             else:
                 ai_response = response_message.content
 
-            # Обновляем историю в памяти и БД (превращаем в дикт)
             history.append({"role": "assistant", "content": ai_response})
             await db.save_user_data(user_id, history)
-            
             return ai_response
             
         except Exception as e:
