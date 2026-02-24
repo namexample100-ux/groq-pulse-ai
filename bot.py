@@ -79,8 +79,8 @@ def models_keyboard():
     buttons = [
         [InlineKeyboardButton(text="💎 Llama 3.3 70B (Smartest)", callback_data="set_model_llama-3.3-70b-versatile")],
         [InlineKeyboardButton(text="⚡ Llama 3.1 8B (Instant)", callback_data="set_model_llama-3.1-8b-instant")],
-        [InlineKeyboardButton(text="🌀 Mixtral 8x7b (Balanced)", callback_data="set_model_mixtral-8x7b-32768")],
-        [InlineKeyboardButton(text="🐥 Gemma 2 9b (Light)", callback_data="set_model_gemma2-9b-it")]
+        [InlineKeyboardButton(text="🌀 Qwen 3 32B (Balanced)", callback_data="set_model_qwen/qwen3-32b")],
+        [InlineKeyboardButton(text="🚀 Llama 4 Maverick (New Gen)", callback_data="set_model_meta-llama/llama-4-maverick-17b-128e-instruct")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
