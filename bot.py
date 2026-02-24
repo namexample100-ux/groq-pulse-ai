@@ -70,7 +70,7 @@ async def start_web_server():
 
 def main_keyboard():
     kb = [
-        [KeyboardButton(text="🧠 Выбор модели")],
+        [KeyboardButton(text="🧠 Chat-модели"), KeyboardButton(text="🖼 Image-модели")],
         [KeyboardButton(text="🧹 Очистить память"), KeyboardButton(text="ℹ️ О модели")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -81,6 +81,16 @@ def models_keyboard():
         [InlineKeyboardButton(text="⚡ Llama 3.1 8B (Instant)", callback_data="set_model_llama-3.1-8b-instant")],
         [InlineKeyboardButton(text="🌀 Qwen 3 32B (Balanced)", callback_data="set_model_qwen/qwen3-32b")],
         [InlineKeyboardButton(text="🚀 Llama 4 Maverick (New Gen)", callback_data="set_model_meta-llama/llama-4-maverick-17b-128e-instruct")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def image_models_keyboard():
+    buttons = [
+        [InlineKeyboardButton(text="🎨 FLUX.1 [schnell] (Best)", callback_data="set_img_black-forest-labs/FLUX.1-schnell")],
+        [InlineKeyboardButton(text="📸 Stable Diffusion 3.5", callback_data="set_img_stabilityai/stable-diffusion-3.5-large")],
+        [InlineKeyboardButton(text="🏮 Kolors (Ultra Phoreal)", callback_data="set_img_Kwai-Kolors/Kolors")],
+        [InlineKeyboardButton(text="⚡ SDXL Turbo (Instant)", callback_data="set_img_stabilityai/sdxl-turbo")],
+        [InlineKeyboardButton(text="🌸 Animagine (Anime Style)", callback_data="set_img_cagliostrolab/animagine-xl-3.1")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -102,36 +112,55 @@ async def clear_memory(message: Message):
 
 @router.message(F.text == "ℹ️ О модели")
 async def model_info(message: Message):
-    _, current_model = await db.get_user_data(message.from_user.id)
-    from config import DEFAULT_MODEL
-    model_to_show = current_model or DEFAULT_MODEL
+    _, current_model, img_model = await db.get_user_data(message.from_user.id)
+    from config import DEFAULT_MODEL, DEFAULT_IMAGE_MODEL
+    chat_m = current_model or DEFAULT_MODEL
+    img_m = (img_model or DEFAULT_IMAGE_MODEL).split('/')[-1]
+    
     await message.answer(
-        f"🧠 <b>Текущая конфигурация:</b>\n\n"
-        f"• Модель: <code>{model_to_show}</code>\n"
-        f"• Инференс: Groq LPU (Ultra Fast)"
+        f"🤖 <b>Ваш статус: GroqPulse v4.5</b>\n\n"
+        f"💬 <b>Chat Model:</b> <code>{chat_m}</code>\n"
+        f"🖼 <b>Image Model:</b> <code>{img_m}</code>\n"
+        f"⚡ <b>Inference:</b> Groq + HF"
     )
 
-@router.message(F.text == "🧠 Выбор модели")
+@router.message(F.text == "🧠 Chat-модели")
 async def show_models(message: Message):
     await message.answer(
         "🎭 <b>Выберите модель для общения:</b>\n\n"
-        "• <b>70B</b> — самая умная, подходит для сложных задач.\n"
-        "• <b>8B / Gemma</b> — самые быстрые, идеальны для чата.\n"
-        "• <b>Mixtral</b> — отличный баланс логики и скорости.",
+        "• <b>Llama 3.3 70B</b> — самая умная.\n"
+        "• <b>Qwen / Llama 4</b> — новые горизонты.\n"
+        "• <b>8B</b> — быстрая для чата.",
         reply_markup=models_keyboard()
+    )
+
+@router.message(F.text == "🖼 Image-модели")
+async def show_image_models(message: Message):
+    await message.answer(
+        "🎨 <b>Выберите модель для рисования:</b>\n\n"
+        "• <b>FLUX</b> — лидер фотореализма.\n"
+        "• <b>SD 3.5</b> — понимает сложные промпты.\n"
+        "• <b>Kolors</b> — идеальный свет и кожа.\n"
+        "• <b>Animagine</b> — лучший аниме-арт.",
+        reply_markup=image_models_keyboard()
     )
 
 @router.callback_query(F.data.startswith("set_model_"))
 async def process_model_selection(callback: CallbackQuery):
     model_name = callback.data.replace("set_model_", "")
-    await ai.set_model(callback.from_user.id, model_name)
+    await db.save_user_data(callback.from_user.id, model_name=model_name)
     
-    await callback.answer(f"✅ Установлена модель {model_name}")
-    await callback.message.edit_text(
-        f"✅ <b>Модель успешно изменена!</b>\n"
-        f"Теперь я использую: <code>{model_name}</code>\n\n"
-        f"Вся память диалога сохранена."
-    )
+    await callback.answer(f"✅ Чат: {model_name}")
+    await callback.message.edit_text(f"✅ <b>Чат-модель изменена на:</b> <code>{model_name}</code>")
+
+@router.callback_query(F.data.startswith("set_img_"))
+async def process_image_model_selection(callback: CallbackQuery):
+    img_model = callback.data.replace("set_img_", "")
+    await db.save_user_data(callback.from_user.id, image_model=img_model)
+    
+    short_name = img_model.split('/')[-1]
+    await callback.answer(f"✅ Фото: {short_name}")
+    await callback.message.edit_text(f"✅ <b>Image-модель изменена на:</b> <code>{short_name}</code>")
 
 @router.message(Command("img"))
 async def cmd_img(message: Message):
@@ -160,11 +189,15 @@ async def cmd_img(message: Message):
             # Продолжаем с оригинальным промптом
 
         # 2. Генерируем картинку через Hugging Face
-        image_bytes = await image_gen.generate_image(english_prompt)
+        # Получаем выбранную модель пользователя
+        _, _, user_img_model = await db.get_user_data(message.from_user.id)
         
+        image_bytes = await image_gen.generate_image(english_prompt, model_id=user_img_model)
+        
+        model_display = (user_img_model or "FLUX.1").split('/')[-1]
         await message.answer_photo(
             photo=BufferedInputFile(image_bytes, filename="art.png"),
-            caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: FLUX.1 (Hugging Face)</i>"
+            caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: {model_display}</i>"
         )
     except Exception as e:
         log.error(f"Image Gen Error: {e}", exc_info=True)
