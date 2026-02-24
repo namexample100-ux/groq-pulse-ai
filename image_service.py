@@ -18,7 +18,8 @@ class ImageService:
             raise Exception("HF_TOKEN is missing. Please add it to config.")
 
         target_model = model_id or self.default_model
-        api_url = f"https://api-inference.huggingface.co/models/{target_model}"
+        # Используем актуальный Router API (предыдущий api-inference выдает 410 Gone)
+        api_url = f"https://router.huggingface.co/hf-inference/models/{target_model}"
         
         headers = {"Authorization": f"Bearer {HF_TOKEN}"}
         payload = {"inputs": prompt}
