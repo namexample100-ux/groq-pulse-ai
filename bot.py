@@ -192,9 +192,9 @@ async def cmd_img(message: Message):
         # Получаем выбранную модель пользователя
         _, _, user_img_model = await db.get_user_data(message.from_user.id)
         
-        image_bytes = await image_gen.generate_image(english_prompt, model_id=user_img_model)
+        image_bytes, used_model = await image_gen.generate_image(english_prompt, model_id=user_img_model)
         
-        model_display = (user_img_model or "FLUX.1").split('/')[-1]
+        model_display = used_model.split('/')[-1]
         await message.answer_photo(
             photo=BufferedInputFile(image_bytes, filename="art.png"),
             caption=f"🎨 <b>Ваш запрос:</b> {prompt}\n✨ <i>Модель: {model_display}</i>"
