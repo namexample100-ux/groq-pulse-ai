@@ -17,6 +17,7 @@ from aiohttp import web
 from typing import Callable, Any, Awaitable
 
 from voice_service import voice_service
+from reminder_service import reminder_manager
 from config import BOT_TOKEN, ADMIN_ID, DEFAULT_MODEL
 from groq_service import ai
 from image_service import image_gen
@@ -378,6 +379,10 @@ async def chat_handler(message: Message):
 async def main():
     # Инициализация БД
     await db.init_db()
+    
+    # Настройка напоминаний
+    reminder_manager.set_bot(bot)
+    reminder_manager.start()
     
     # Запуск веб-сервера
     asyncio.create_task(start_web_server())

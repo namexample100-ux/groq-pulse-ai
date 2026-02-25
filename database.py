@@ -44,8 +44,20 @@ async def init_db():
                 await conn.execute("ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS image_model TEXT DEFAULT NULL")
             except:
                 pass
+            
+            # Таблица для напоминаний
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    text TEXT NOT NULL,
+                    remind_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
                 
-            log.info("✅ Таблица chat_history проверена/создана.")
+            log.info("✅ Таблицы БД проверены/созданы.")
             
     except Exception as e:
         log.error(f"❌ Ошибка БД: {e}")
@@ -109,6 +121,45 @@ async def clear_user_history(user_id: int):
             )
     except Exception as e:
         log.error(f"❌ Ошибка очистки истории: {e}")
+
+async def add_reminder(user_id: int, text: str, remind_at: str):
+    """Добавляет напоминание в БД."""
+    if not _pool: return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO reminders (user_id, text, remind_at) VALUES ($1, $2, $3)",
+                user_id, text, remind_at
+            )
+    except Exception as e:
+        log.error(f"❌ Ошибка добавления напоминания: {e}")
+
+async def get_pending_reminders():
+    """Получает напоминания, время которых пришло."""
+    if not _pool: return []
+    try:
+        import datetime
+        now = datetime.datetime.now(datetime.timezone.utc)
+        async with _pool.acquire() as conn:
+            return await conn.fetch(
+                "SELECT id, user_id, text FROM reminders WHERE status = 'pending' AND remind_at <= $1",
+                now
+            )
+    except Exception as e:
+        log.error(f"❌ Ошибка получения напоминаний: {e}")
+        return []
+
+async def mark_reminder_done(reminder_id: int):
+    """Помечает напоминание как выполненное."""
+    if not _pool: return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE reminders SET status = 'completed' WHERE id = $1",
+                reminder_id
+            )
+    except Exception as e:
+        log.error(f"❌ Ошибка обновления статуса напоминания: {e}")
 
 async def close_db():
     """Закрытие пула."""

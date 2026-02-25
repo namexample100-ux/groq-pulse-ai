@@ -51,6 +51,36 @@ TOOLS = [
                 "required": ["expression"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_reminder",
+            "description": "Sets a reminder for the user. Example: text='Meeting', time_str='in 15 minutes' or 'at 18:00'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The content of the reminder (e.g. 'Buy milk')"},
+                    "time_str": {"type": "string", "description": "Time description (e.g. 'in 5 minutes', 'tomorrow at 10:00', 'at 15:00')"}
+                },
+                "required": ["text", "time_str"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_doc",
+            "description": "Analyze the content of a previously uploaded document.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the document file."},
+                    "query": {"type": "string", "description": "What to look for or analyze in the document."}
+                },
+                "required": ["path", "query"]
+            }
+        }
     }
 ]
 
@@ -82,6 +112,7 @@ class GroqService:
                 "1. If the user asks about current events, use 'search_web'. "
                 "2. If the user asks for time/date, use 'get_current_time'. "
                 "3. For complex math, use 'calculate_math'. "
+                "4. To set a reminder, use 'add_reminder'. "
                 "Always answer in the language the user speaks to you. "
                 "CRITICAL: When using search results, ALWAYS provide clickable links (URLs) to the sources."
             )
@@ -149,24 +180,26 @@ class GroqService:
                         tool_content = await search_tool.search(query)
                     
                     elif function_name == "get_current_time":
-                        now = datetime.datetime.now()
-                        tool_content = f"Текущее время и дата: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+                        tool_content = await self.tool_get_current_time()
                         log.info(f"🕒 Агент запрашивает время")
 
                     elif function_name == "calculate_math":
-                        expr = function_args.get("expression")
-                        try:
-                            # Простая и безопасная оценка (для демки)
-                            # В проде лучше использовать специализированную либу
-                            result = eval(expr, {"__builtins__": None}, {})
-                            tool_content = f"Результат вычисления '{expr}': {result}"
-                        except Exception as math_err:
-                            tool_content = f"Ошибка вычисления: {math_err}"
-                        log.info(f"🔢 Агент считает: {expr}")
+                        tool_content = await self.tool_calculate_math(function_args.get("expression"))
+                        log.info(f"🔢 Агент вычисляет математику")
                     
+                    elif function_name == "add_reminder":
+                        tool_content = await self.tool_add_reminder(user_id, **function_args)
+                        log.info(f"� Агент ставит напоминание")
+                    
+                    elif function_name == "analyze_doc":
+                        path = function_args.get("path")
+                        query = function_args.get("query")
+                        log.info(f"📄 Агент анализирует файл: {path}")
+                        tool_content = await doc_tool.analyze(path, query)
+
                     history.append({
-                        "tool_call_id": tool_call.id,
                         "role": "tool",
+                        "tool_call_id": tool_call.id,
                         "name": function_name,
                         "content": tool_content,
                     })
@@ -300,6 +333,46 @@ class GroqService:
 
     async def set_model(self, user_id: int, model_name: str):
         await db.save_user_data(user_id, model_name=model_name)
+
+    async def tool_add_reminder(self, user_id: int, text: str, time_str: str) -> str:
+        """Инструмент для добавления напоминания."""
+        try:
+            from dateutil import parser
+            import datetime
+            
+            now = datetime.datetime.now()
+            
+            # Попытка парсинга относительного времени (упрощенно)
+            remind_at = None
+            ts = time_str.lower()
+            
+            if "через" in ts or "in " in ts:
+                number = int(''.join(filter(str.isdigit, ts)))
+                if "мин" in ts or "min" in ts:
+                    remind_at = now + datetime.timedelta(minutes=number)
+                elif "час" in ts or "hour" in ts:
+                    remind_at = now + datetime.timedelta(hours=number)
+                elif "сек" in ts or "sec" in ts:
+                    remind_at = now + datetime.timedelta(seconds=number)
+                elif "день" in ts or "day" in ts:
+                    remind_at = now + datetime.timedelta(days=number)
+            
+            if not remind_at:
+                # Универсальный парсер для форматов типа "18:00" или "tomorrow at 10:00"
+                remind_at = parser.parse(time_str, fuzzy=True, default=now)
+                # Если время в прошлом (например, указано 09:00, а сейчас 10:00), прибавляем день
+                if remind_at < now:
+                    remind_at += datetime.timedelta(days=1)
+
+            # Сохраняем в БД (в формате ISO)
+            await db.add_reminder(user_id, text, remind_at.isoformat())
+            
+            pretty_time = remind_at.strftime("%H:%M %d.%m.%Y")
+            return f"✅ Напоминание установлено: '{text}' на {pretty_time}"
+            
+        except Exception as e:
+            log.error(f"Add Reminder Tool Error: {e}")
+            return f"❌ Ошибка при установке напоминания: {str(e)}"
 
     async def transcribe_audio(self, audio_file_path: str) -> str:
         """Транскрибирует аудио через Groq Whisper."""

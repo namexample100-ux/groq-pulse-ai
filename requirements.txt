@@ -6,3 +6,5 @@ httpx
 asyncpg
 pymupdf
 gTTS
+APScheduler
+python-dateutil
