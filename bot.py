@@ -151,6 +151,18 @@ async def show_image_models(message: Message):
         reply_markup=image_models_keyboard()
     )
 
+@router.message(Command("stats"))
+async def cmd_stats(message: Message):
+    """Показывает статистику бота."""
+    stats = await db.get_stats()
+    text = (
+        "📊 <b>Статистика GroqPulse:</b>\n\n"
+        f"👥 Пользователей: {stats.get('users', 0)}\n"
+        f"🔔 Напоминаний: {stats.get('reminders', 0)}\n"
+        f"🧠 Фактов в памяти: {stats.get('memories', 0)}"
+    )
+    await message.answer(text)
+
 @router.message(Command("forget"))
 async def cmd_forget(message: Message):
     """Очищает вечную память пользователя."""

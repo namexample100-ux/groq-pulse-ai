@@ -9,6 +9,7 @@ from groq import AsyncGroq
 from config import GROQ_API_KEY, DEFAULT_MODEL
 import database as db
 from search_service import search_tool
+from doc_service import doc_tool
 
 log = logging.getLogger(__name__)
 
@@ -359,6 +360,21 @@ class GroqService:
 
     async def set_model(self, user_id: int, model_name: str):
         await db.save_user_data(user_id, model_name=model_name)
+
+    async def tool_get_current_time(self) -> str:
+        """Инструмент для получения текущего времени."""
+        import datetime
+        now = datetime.datetime.now()
+        return f"🕒 Текущее время: {now.strftime('%H:%M:%S')}. Дата: {now.strftime('%d.%m.%Y')}."
+
+    async def tool_calculate_math(self, expression: str) -> str:
+        """Инструмент для вычисления математических выражений."""
+        try:
+            # Безопасное вычисление (ограниченное)
+            result = eval(expression, {"__builtins__": None}, {})
+            return f"🔢 Результат: {result}"
+        except Exception as e:
+            return f"❌ Ошибка вычисления: {str(e)}"
 
     async def tool_add_reminder(self, user_id: int, text: str, time_str: str) -> str:
         """Инструмент для добавления напоминания."""

@@ -215,6 +215,23 @@ async def clear_memories(user_id: int):
     except Exception as e:
         log.error(f"❌ Ошибка очистки памяти: {e}")
 
+async def get_stats():
+    """Получает общую статистику по базе."""
+    if not _pool: return {}
+    try:
+        async with _pool.acquire() as conn:
+            users_count = await conn.fetchval("SELECT COUNT(*) FROM chat_history")
+            reminders_count = await conn.fetchval("SELECT COUNT(*) FROM reminders")
+            memories_count = await conn.fetchval("SELECT COUNT(*) FROM user_memories")
+            return {
+                "users": users_count,
+                "reminders": reminders_count,
+                "memories": memories_count
+            }
+    except Exception as e:
+        log.error(f"❌ Ошибка получения статистики: {e}")
+        return {}
+
 async def close_db():
     """Закрытие пула."""
     if _pool:
