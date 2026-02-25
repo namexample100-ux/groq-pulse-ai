@@ -130,7 +130,7 @@ async def clear_memory(message: Message):
 
 @router.message(F.text == "ℹ️ О модели")
 async def model_info(message: Message):
-    _, current_model, img_model = await db.get_user_data(message.from_user.id)
+    _, current_model, img_model, _ = await db.get_user_data(message.from_user.id)
     from config import DEFAULT_MODEL, DEFAULT_IMAGE_MODEL
     chat_m = current_model or DEFAULT_MODEL
     img_m = (img_model or DEFAULT_IMAGE_MODEL).split('/')[-1]
@@ -199,7 +199,7 @@ async def process_speak_last(callback: CallbackQuery):
     await callback.answer("⏳ Генерирую голос...")
     
     # Получаем последнее сообщение из БД
-    history, _, _ = await db.get_user_data(callback.from_user.id)
+    history, _, _, _ = await db.get_user_data(callback.from_user.id)
     if not history:
         await callback.message.answer("❌ История пуста.")
         return

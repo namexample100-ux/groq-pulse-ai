@@ -285,7 +285,7 @@ class GroqService:
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
         
         # Получаем контекст, чтобы бот помнил, о чем говорили раньше
-        history, _, _ = await db.get_user_data(user_id)
+        history, _, _, _ = await db.get_user_data(user_id)
         if not history:
             history = [{"role": "system", "content": "You are GroqPulse, a helpful AI with vision capabilities. Describe images accurately and answer questions about them."}]
 
@@ -330,7 +330,7 @@ class GroqService:
         if not GROQ_API_KEY:
             return "❌ GROQ_API_KEY не задан."
 
-        history, _, _ = await db.get_user_data(user_id)
+        history, _, _, _ = await db.get_user_data(user_id)
         
         # Системная вставка про документ
         doc_info = f"Пользователь прислал документ: {file_name}.\n\nСодержимое документа:\n\"\"\"\n{doc_text}\n\"\"\"\n\nПроанализируй этот текст и приготовься отвечать на вопросы по нему. Если текст слишком длинный, сфокусируйся на главных тезах."
