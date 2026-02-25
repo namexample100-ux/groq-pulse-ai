@@ -100,6 +100,14 @@ TOOLS = [
     }
 ]
 
+# Пресеты персонажей
+CHARACTERS = {
+    "default": "You are GroqPulse, an advanced AI Agent. You are helpful, polite, and efficient.",
+    "coder": "You are GroqPulse Coder. You are an expert senior software engineer. Focus on clean code, best practices, and detailed technical explanations. Use markdown for code blocks.",
+    "teacher": "You are GroqPulse Teacher. Your goal is to explain complex concepts in simple terms. Use analogies, step-by-step guides, and encourage the user to ask questions.",
+    "friend": "You are GroqPulse Friend. You are a friendly, informal, and supportive companion. Use a relaxed tone and be empathetic."
+}
+
 class GroqService:
     def __init__(self):
         proxy = os.getenv("PROXY")
@@ -117,8 +125,10 @@ class GroqService:
         if not GROQ_API_KEY:
             return "❌ GROQ_API_KEY не задан в настройках."
         
-        history, user_model, _ = await db.get_user_data(user_id)
+        # Получаем данные пользователя
+        history, user_model, _, character = await db.get_user_data(user_id)
         current_model = user_model or DEFAULT_MODEL
+        current_char = character or "default"
 
         # Получаем Вечную Память
         memories = await db.get_memories(user_id)
@@ -127,20 +137,21 @@ class GroqService:
             memory_context = "\n\n[USER ETERNAL MEMORY]:\n" + "\n".join([f"- {m}" for m in memories])
 
         # Системный промпт для Агента
-        system_prompt = {
-            "role": "system", 
-            "content": (
-                "You are GroqPulse, an advanced AI Agent. You have access to real-time tools. "
-                "1. If the user asks about current events, use 'search_web'. "
-                "2. If the user asks for time/date, use 'get_current_time'. "
-                "3. For complex math, use 'calculate_math'. "
-                "4. To set a reminder, use 'add_reminder'. "
-                "5. To save a fact about user, use 'save_memory'. "
-                "Always answer in the language the user speaks to you. "
-                "CRITICAL: When using search results, ALWAYS provide clickable links (URLs) to the sources."
-                f"{memory_context}"
-            )
-        }
+        char_prompt = CHARACTERS.get(current_char, CHARACTERS["default"])
+        system_content = (
+            f"{char_prompt}\n\n"
+            "You have access to real-time tools:\n"
+            "1. If the user asks about current events, use 'search_web'.\n"
+            "2. If the user asks for time/date, use 'get_current_time'.\n"
+            "3. For complex math, use 'calculate_math'.\n"
+            "4. To set a reminder, use 'add_reminder'.\n"
+            "5. To save a fact about user, use 'save_memory'.\n"
+            "Always answer in the language the user speaks to you. "
+            "CRITICAL: When using search results, ALWAYS provide clickable links (URLs) to the sources."
+            f"{memory_context}"
+        )
+
+        system_prompt = {"role": "system", "content": system_content}
 
         if not history:
             history = [system_prompt]

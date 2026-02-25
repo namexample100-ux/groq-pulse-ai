@@ -72,7 +72,8 @@ async def start_web_server():
 
 def main_keyboard():
     kb = [
-        [KeyboardButton(text="🧠 Chat-модели"), KeyboardButton(text="🖼 Image-модели")],
+        [KeyboardButton(text="🧠 Chat-модели"), KeyboardButton(text="🖼 Image-models")],
+        [KeyboardButton(text="🎭 Персонаж")],
         [KeyboardButton(text="🧹 Очистить память"), KeyboardButton(text="ℹ️ О модели")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -95,6 +96,17 @@ def image_models_keyboard():
         [InlineKeyboardButton(text="🌸 Animagine (Anime Style)", callback_data="set_img_cagliostrolab/animagine-xl-3.1")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def characters_keyboard():
+    """Клавиатура выбора персонажа."""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🤖 Default", callback_data="char_default")
+    builder.button(text="💻 Coder", callback_data="char_coder")
+    builder.button(text="🎓 Teacher", callback_data="char_teacher")
+    builder.button(text="🍦 Friend", callback_data="char_friend")
+    builder.adjust(2)
+    return builder.as_markup()
 
 def speak_keyboard():
     buttons = [[InlineKeyboardButton(text="🔊 Озвучить", callback_data="speak_last")]]
@@ -138,6 +150,18 @@ async def show_models(message: Message):
         "• <b>Qwen / Llama 4</b> — новые горизонты.\n"
         "• <b>8B</b> — быстрая для чата.",
         reply_markup=models_keyboard()
+    )
+
+@router.message(F.text == "🎭 Персонаж")
+@router.message(Command("character"))
+async def show_characters(message: Message):
+    await message.answer(
+        "🎭 <b>Выберите роль для GroqPulse:</b>\n\n"
+        "• <b>Default</b> — универсальный помощник.\n"
+        "• <b>Coder</b> — эксперт в программировании.\n"
+        "• <b>Teacher</b> — объясняет всё просто.\n"
+        "• <b>Friend</b> — неформальный и душевный.",
+        reply_markup=characters_keyboard()
     )
 
 @router.message(F.text == "🖼 Image-модели")
@@ -211,6 +235,23 @@ async def process_image_model_selection(callback: CallbackQuery):
     short_name = img_model.split('/')[-1]
     await callback.answer(f"✅ Фото: {short_name}")
     await callback.message.edit_text(f"✅ <b>Image-модель изменена на:</b> <code>{short_name}</code>")
+
+@router.callback_query(F.data.startswith("char_"))
+async def process_character_selection(callback: CallbackQuery):
+    """Выбор персонажа."""
+    char_id = callback.data.split("_")[1]
+    await db.save_user_data(callback.from_user.id, character=char_id)
+    
+    # Визуальное подтверждение
+    char_names = {
+        "default": "🤖 Default",
+        "coder": "💻 Coder",
+        "teacher": "🎓 Teacher",
+        "friend": "🍦 Friend"
+    }
+    name = char_names.get(char_id, char_id)
+    await callback.answer(f"Выбрана роль: {name}")
+    await callback.message.edit_text(f"✅ <b>Роль изменена!</b>\nТеперь я — <b>{name}</b>.")
 
 @router.message(Command("img"))
 async def cmd_img(message: Message):

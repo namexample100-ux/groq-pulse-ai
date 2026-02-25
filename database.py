@@ -42,6 +42,7 @@ async def init_db():
             # Попытка добавить колонку если она не существует (Миграция)
             try:
                 await conn.execute("ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS image_model TEXT DEFAULT NULL")
+                await conn.execute("ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS character TEXT DEFAULT 'default'")
             except:
                 pass
             
@@ -79,43 +80,39 @@ async def get_user_data(user_id: int):
     try:
         async with _pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT messages, model_name, image_model FROM chat_history WHERE user_id = $1",
+                "SELECT messages, model_name, image_model, character FROM chat_history WHERE user_id = $1",
                 user_id
             )
             if row:
-                return json.loads(row['messages']), row['model_name'], row['image_model']
-            return [], None, None
+                return json.loads(row['messages']), row['model_name'], row['image_model'], row['character']
+            return [], None, None, 'default'
     except Exception as e:
         log.error(f"❌ Ошибка получения данных: {e}")
         return [], None, None
 
-async def save_user_data(user_id: int, messages: list = None, model_name: str = None, image_model: str = None):
-    """Сохраняет историю, чат-модель или image-модель."""
+async def save_user_data(user_id: int, messages: list = None, model_name: str = None, image_model: str = None, character: str = None):
+    """Сохраняет историю, чат-модель, image-модель или персонажа."""
     if not _pool: return
     
     try:
         async with _pool.acquire() as conn:
+            # Сначала проверяем существование записи
+            exists = await conn.fetchval("SELECT 1 FROM chat_history WHERE user_id = $1", user_id)
+            if not exists:
+                await conn.execute("INSERT INTO chat_history (user_id) VALUES ($1)", user_id)
+
             if messages is not None:
                 messages_json = json.dumps(messages)
-                await conn.execute("""
-                    INSERT INTO chat_history (user_id, messages, updated_at)
-                    VALUES ($1, $2, CURRENT_TIMESTAMP)
-                    ON CONFLICT (user_id) DO UPDATE SET messages = $2, updated_at = CURRENT_TIMESTAMP
-                """, user_id, messages_json)
+                await conn.execute("UPDATE chat_history SET messages = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2", messages_json, user_id)
             
-            if model_name:
-                await conn.execute("""
-                    INSERT INTO chat_history (user_id, model_name, updated_at)
-                    VALUES ($1, $2, CURRENT_TIMESTAMP)
-                    ON CONFLICT (user_id) DO UPDATE SET model_name = $2, updated_at = CURRENT_TIMESTAMP
-                """, user_id, model_name)
-                
-            if image_model:
-                await conn.execute("""
-                    INSERT INTO chat_history (user_id, image_model, updated_at)
-                    VALUES ($1, $2, CURRENT_TIMESTAMP)
-                    ON CONFLICT (user_id) DO UPDATE SET image_model = $2, updated_at = CURRENT_TIMESTAMP
-                """, user_id, image_model)
+            if model_name is not None:
+                await conn.execute("UPDATE chat_history SET model_name = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2", model_name, user_id)
+
+            if image_model is not None:
+                await conn.execute("UPDATE chat_history SET image_model = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2", image_model, user_id)
+            
+            if character is not None:
+                await conn.execute("UPDATE chat_history SET character = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2", character, user_id)
     except Exception as e:
         log.error(f"❌ Ошибка сохранения данных: {e}")
 
