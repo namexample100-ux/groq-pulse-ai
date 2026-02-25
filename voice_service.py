@@ -9,7 +9,8 @@ class VoiceService:
     def __init__(self):
         # Используем MMS model для русского языка
         self.model_id = "facebook/mms-tts-rus"
-        self.api_url = f"https://api-inference.huggingface.co/models/{self.model_id}"
+        # Используем актуальный Router API
+        self.api_url = f"https://router.huggingface.co/hf-inference/models/{self.model_id}"
 
     async def text_to_speech(self, text: str) -> bytes:
         """Преобразует текст в речь через Hugging Face."""
