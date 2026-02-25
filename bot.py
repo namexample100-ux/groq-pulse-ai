@@ -300,6 +300,30 @@ async def cmd_img(message: Message):
         else:
             await message.answer(f"⚠️ <b>Произошла ошибка:</b>\n<code>{error_msg}</code>")
 
+async def send_ai_response(message: Message, ai_data: tuple[str, list]):
+    """Отправляет текстовый ответ и медиа-файлы от ИИ."""
+    response_text, media_list = ai_data
+    
+    # 1. Отправляем медиа (картинки), если они есть
+    for media in media_list:
+        if media["type"] == "photo":
+            from aiogram.types import BufferedInputFile
+            await message.answer_photo(
+                photo=BufferedInputFile(media["data"], filename="ai_art.jpg"),
+                caption=media.get("caption", "")
+            )
+
+    # 2. Отправляем текст
+    if not response_text:
+        return
+
+    if len(response_text) > 4000:
+        await message.answer(response_text[0:4000], reply_markup=speak_keyboard())
+        for i in range(4000, len(response_text), 4000):
+            await message.answer(response_text[i:i+4000])
+    else:
+        await message.answer(response_text, reply_markup=speak_keyboard())
+
 @router.message(F.voice)
 async def handle_voice(message: Message):
     """Обработка голосовых сообщений (STT)."""
@@ -331,19 +355,22 @@ async def handle_voice(message: Message):
         await message.answer(f"🎤 <b>Вы сказали:</b>\n<i>{transcription}</i>")
 
         # 4. Обрабатываем как обычный текст
-        response = await ai.get_response(message.from_user.id, transcription)
+        response_data = await ai.get_response(message.from_user.id, transcription)
         
-        # 5. Авто-озвучка ответа (Голос в Голос)
+        # 5. Отправляем ответ (текст + возможно картинка)
+        await send_ai_response(message, response_data)
+        
+        # 6. Авто-озвучка ответа (Голос в Голос) - берем только текст
+        response_text = response_data[0]
         await message.bot.send_chat_action(chat_id=message.chat.id, action="record_voice")
         try:
-            audio_bytes = await voice_service.text_to_speech(response)
+            audio_bytes = await voice_service.text_to_speech(response_text)
             await message.answer_voice(
                 voice=BufferedInputFile(audio_bytes, filename="answer.mp3"),
                 caption="🔊 <b>Голосовой ответ</b>"
             )
         except Exception as tts_err:
             log.warning(f"Auto-TTS Error: {tts_err}")
-            await message.answer(response)
 
     except Exception as e:
         log.error(f"Voice Handler Error: {e}", exc_info=True)
@@ -361,13 +388,13 @@ async def handle_photo(message: Message):
         image_bytes = await message.bot.download_file(file.file_path)
         
         # Передаем в ИИ-зрение
-        response = await ai.get_vision_response(
+        response_data = await ai.get_vision_response(
             user_id=message.from_user.id,
             image_bytes=image_bytes.read(),
             caption=message.caption
         )
         
-        await message.answer(response)
+        await send_ai_response(message, response_data)
     except Exception as e:
         log.error(f"Vision Handler Error: {e}", exc_info=True)
         await message.answer(f"⚠️ Ошибка при обработке фото: {str(e)}")
@@ -396,13 +423,14 @@ async def handle_document(message: Message):
             return
 
         # Отправляем в ИИ для анализа
-        response = await ai.get_doc_response(
+        response_data = await ai.get_doc_response(
             user_id=message.from_user.id,
             doc_text=doc_text,
             file_name=file_name
         )
         
-        await wait_msg.edit_text(response)
+        await wait_msg.delete() # Удаляем "секунду, читаю..."
+        await send_ai_response(message, response_data)
     except Exception as e:
         log.error(f"Doc Handler Error: {e}", exc_info=True)
         await wait_msg.edit_text(f"⚠️ Ошибка при чтении файла: {str(e)}")
@@ -423,17 +451,8 @@ async def chat_handler(message: Message):
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
     
     # Получаем ответ от AI
-    response = await ai.get_response(message.from_user.id, message.text)
-    
-    # Отправляем ответ частями, если он слишком длинный (лимит TG ~4000 символов)
-    if len(response) > 4000:
-        # Отправляем первую часть с кнопкой озвучки
-        await message.answer(response[0:4000], reply_markup=speak_keyboard())
-        for i in range(4000, len(response), 4000):
-            await message.answer(response[i:i+4000])
-    else:
-        # Отправляем ответ с кнопкой озвучки
-        await message.answer(response, reply_markup=speak_keyboard())
+    response_data = await ai.get_response(message.from_user.id, message.text)
+    await send_ai_response(message, response_data)
 
 async def main():
     # Инициализация БД

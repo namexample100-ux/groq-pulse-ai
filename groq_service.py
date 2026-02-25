@@ -10,6 +10,7 @@ from config import GROQ_API_KEY, DEFAULT_MODEL
 import database as db
 from search_service import search_tool
 from doc_service import doc_tool
+from image_service import image_gen
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +112,20 @@ TOOLS = [
                 "required": ["channel_name"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": "Generate an image or visualization based on a user's request. Always use this when user asks to see something, draw something or create a design.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "The description of the image to generate. Be detailed and creative."}
+                },
+                "required": ["prompt"]
+            }
+        }
     }
 ]
 
@@ -134,10 +149,14 @@ class GroqService:
             
         self.max_context = 10
 
-    async def get_response(self, user_id: int, user_text: str) -> str:
-        """Получает ответ от ИИ-агента с поддержкой инструментов."""
+    async def get_response(self, user_id: int, user_text: str) -> tuple[str, list]:
+        """Получает ответ от ИИ-агента с поддержкой инструментов.
+        Возвращает кортеж (текст_ответа, список_медиа).
+        """
         if not GROQ_API_KEY:
-            return "❌ GROQ_API_KEY не задан в настройках."
+            return "❌ GROQ_API_KEY не задан в настройках.", []
+        
+        media_to_send = []
         
         # Получаем данные пользователя
         history, user_model, _, character = await db.get_user_data(user_id)
@@ -160,7 +179,9 @@ class GroqService:
             "3. For complex math, use 'calculate_math'.\n"
             "4. To set a reminder, use 'add_reminder'.\n"
             "5. To save a fact about user, use 'save_memory'.\n"
+            "6. To generate an image or drawing, use 'generate_image'.\n"
             "Always answer in the language the user speaks to you. "
+            "If the user asks to draw, visualize, or show something, USE 'generate_image'. "
             "CRITICAL: When using search results, ALWAYS provide clickable links (URLs) to the sources."
             f"{memory_context}"
         )
@@ -250,6 +271,17 @@ class GroqService:
                         log.info(f"📄 Агент анализирует файл: {path}")
                         tool_content = await doc_tool.analyze(path, query)
 
+                    elif function_name == "generate_image":
+                        prompt = function_args.get("prompt")
+                        log.info(f"🎨 Агент рисует: {prompt}")
+                        img_bytes, used_model, used_prompt = await self.tool_generate_image(user_id, prompt)
+                        media_to_send.append({
+                            "type": "photo",
+                            "data": img_bytes,
+                            "caption": f"✨ Модель: {used_model}\n🎨 Агент нарисовал: {used_prompt}"
+                        })
+                        tool_content = f"Успешно сгенерировано и отправлено изображение по запросу: {used_prompt}"
+
                     history.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
@@ -280,21 +312,21 @@ class GroqService:
 
             history.append({"role": "assistant", "content": ai_response})
             await db.save_user_data(user_id, history)
-            return ai_response
+            return ai_response, media_to_send
             
         except Exception as e:
             log.error(f"Groq Agent Error: {e}", exc_info=True)
             err_str = str(e).lower()
             if "forbidden" in err_str or "access denied" in err_str:
-                return "❌ **Ошибка доступа (403).**\nGroq блокирует запросы из вашего региона."
+                return "❌ **Ошибка доступа (403).**\nGroq блокирует запросы из вашего региона.", []
             if "rate_limit_exceeded" in err_str:
-                return "🚨 **Лимит запросов исчерпан.**\nВсе доступные модели Groq сейчас перегружены. Пожалуйста, подождите 15-20 минут."
-            return f"⚠️ Ошибка ИИ-агента: {str(e)}"
+                return "🚨 **Лимит запросов исчерпан.**\nВсе доступные модели Groq сейчас перегружены. Пожалуйста, подождите 15-20 минут.", []
+            return f"⚠️ Ошибка ИИ-агента: {str(e)}", []
 
     async def clear_context(self, user_id: int):
         await db.clear_user_history(user_id)
 
-    async def get_vision_response(self, user_id: int, image_bytes: bytes, caption: str = None) -> str:
+    async def get_vision_response(self, user_id: int, image_bytes: bytes, caption: str = None) -> tuple[str, list]:
         """Анализирует изображение через Llama 3.2 Vision."""
         if not GROQ_API_KEY:
             return "❌ GROQ_API_KEY не задан."
@@ -338,16 +370,17 @@ class GroqService:
             history.append({"role": "assistant", "content": ai_response})
             await db.save_user_data(user_id, history)
             
-            return ai_response
+            return ai_response, media_to_send
         except Exception as e:
             log.error(f"Vision Error: {e}")
-            return f"⚠️ Ошибка при анализе фото: {str(e)}"
+            return f"⚠️ Ошибка при анализе фото: {str(e)}", []
 
-    async def get_doc_response(self, user_id: int, doc_text: str, file_name: str) -> str:
-        """Обрабатывает контент из документа."""
+    async def get_doc_response(self, user_id: int, doc_text: str, file_name: str) -> tuple[str, list]:
+        """Обрабатывает контент из документа. Возвращает (текст, медиа)."""
         if not GROQ_API_KEY:
-            return "❌ GROQ_API_KEY не задан."
-
+            return "❌ GROQ_API_KEY не задан.", []
+        
+        media_to_send = []
         history, _, _, _ = await db.get_user_data(user_id)
         
         # Системная вставка про документ
@@ -475,6 +508,18 @@ class GroqService:
         except Exception as e:
             log.error(f"Summarize Channel Tool Error: {e}")
             return f"❌ Ошибка при чтению канала: {str(e)}"
+
+    async def tool_generate_image(self, user_id: int, prompt: str) -> tuple[bytes, str, str]:
+        """Инструмент для генерации изображения."""
+        try:
+            # Получаем настройки модели пользователя
+            _, _, image_model, _ = await db.get_user_data(user_id)
+            
+            img_bytes, used_model = await image_gen.generate_image(prompt, model_id=image_model)
+            return img_bytes, used_model, prompt
+        except Exception as e:
+            log.error(f"Tool Generate Image Error: {e}")
+            raise e
 
     async def tool_save_memory(self, user_id: int, content: str) -> str:
         """Инструмент для сохранения фактов в вечную память."""
