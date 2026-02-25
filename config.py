@@ -20,3 +20,8 @@ DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "black-forest-labs/FLUX.1
 
 # Tavily (Web Search)
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+
+# Google Calendar
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "") # e.g. https://your-app.com/callback

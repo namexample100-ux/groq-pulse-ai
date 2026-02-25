@@ -11,6 +11,7 @@ import database as db
 from search_service import search_tool
 from doc_service import doc_tool
 from image_service import image_gen
+from calendar_service import calendar_service
 
 log = logging.getLogger(__name__)
 
@@ -124,6 +125,36 @@ TOOLS = [
                     "prompt": {"type": "string", "description": "The description of the image to generate. Be detailed and creative."}
                 },
                 "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_calendar_events",
+            "description": "List the user's upcoming calendar events. Always use this when user asks about their schedule or plans.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_results": {"type": "integer", "description": "Number of events to list (default 5)."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_calendar_event",
+            "description": "Create a new event in the user's calendar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "Short title of the event."},
+                    "start_time": {"type": "string", "description": "Start time in ISO format (e.g. 2023-10-27T10:00:00)."},
+                    "end_time": {"type": "string", "description": "End time in ISO format (optional)."},
+                    "description": {"type": "string", "description": "Detailed description (optional)."}
+                },
+                "required": ["summary", "start_time"]
             }
         }
     }
@@ -282,6 +313,15 @@ class GroqService:
                             "caption": f"✨ Модель: {used_model}\n🎨 Агент нарисовал: {used_prompt}"
                         })
                         tool_content = f"Успешно сгенерировано и отправлено изображение по запросу: {used_prompt}"
+
+                    elif function_name == "list_calendar_events":
+                        max_res = function_args.get("max_results", 5)
+                        log.info(f"📅 Агент читает календарь")
+                        tool_content = await calendar_service.list_events(user_id, max_res)
+
+                    elif function_name == "create_calendar_event":
+                        log.info(f"📅 Агент создает событие в календаре")
+                        tool_content = await calendar_service.create_event(user_id, **function_args)
 
                     history.append({
                         "role": "tool",

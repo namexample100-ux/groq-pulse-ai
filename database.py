@@ -46,7 +46,7 @@ async def init_db():
             except:
                 pass
             
-            # Таблица для напоминаний
+            # Таблица для напоминаний (текущая система)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS reminders (
                     id SERIAL PRIMARY KEY,
@@ -54,6 +54,19 @@ async def init_db():
                     text TEXT NOT NULL,
                     remind_at TIMESTAMP WITH TIME ZONE NOT NULL,
                     status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # Таблица для Календаря (события с длительностью)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS calendar_events (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    summary TEXT NOT NULL,
+                    description TEXT,
+                    start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+                    end_time TIMESTAMP WITH TIME ZONE NOT NULL,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
             """)
@@ -65,6 +78,20 @@ async def init_db():
                     user_id BIGINT NOT NULL,
                     content TEXT NOT NULL,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+            # Таблица для Google OAuth токенов
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS google_tokens (
+                    user_id BIGINT PRIMARY KEY,
+                    access_token TEXT NOT NULL,
+                    refresh_token TEXT,
+                    token_uri TEXT,
+                    client_id TEXT,
+                    client_secret TEXT,
+                    scopes TEXT,
+                    expiry TIMESTAMP WITH TIME ZONE
                 );
             """)
                 
@@ -228,6 +255,88 @@ async def get_stats():
     except Exception as e:
         log.error(f"❌ Ошибка получения статистики: {e}")
         return {}
+
+async def save_google_token(user_id: int, token_data: dict):
+    """Сохраняет Google OAuth токен в БД."""
+    if not _pool: return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO google_tokens (user_id, access_token, refresh_token, token_uri, client_id, client_secret, scopes, expiry)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    access_token = EXCLUDED.access_token,
+                    refresh_token = COALESCE(EXCLUDED.refresh_token, google_tokens.refresh_token),
+                    expiry = EXCLUDED.expiry
+            """, 
+            user_id, 
+            token_data['token'], 
+            token_data.get('refresh_token'),
+            token_data.get('token_uri'),
+            token_data.get('client_id'),
+            token_data.get('client_secret'),
+            ",".join(token_data.get('scopes', [])),
+            token_data.get('expiry')
+            )
+    except Exception as e:
+        log.error(f"❌ Ошибка сохранения Google токена: {e}")
+
+async def get_google_token(user_id: int):
+    # (Оставляем для совместимости, если нужно, но не используем для нового календаря)
+    if not _pool: return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * google_tokens WHERE user_id = $1", user_id)
+            if row: return dict(row)
+            return None
+    except Exception as e:
+        log.error(f"❌ Ошибка получения Google токена: {e}")
+        return None
+
+# --- Функции Внутреннего Календаря ---
+
+async def add_calendar_event(user_id: int, summary: str, start_time, end_time, description: str = ""):
+    """Добавляет событие в календарь."""
+    if not _pool: return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO calendar_events (user_id, summary, start_time, end_time, description)
+                VALUES ($1, $2, $3, $4, $5)
+            """, user_id, summary, start_time, end_time, description)
+            return True
+    except Exception as e:
+        log.error(f"❌ Ошибка добавления события в календарь: {e}")
+        return False
+
+async def get_calendar_events(user_id: int, limit: int = 10):
+    """Получает предстоящие события пользователя."""
+    if not _pool: return []
+    try:
+        import datetime
+        now = datetime.datetime.now(datetime.timezone.utc)
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM calendar_events 
+                WHERE user_id = $1 AND start_time >= $2 
+                ORDER BY start_time ASC 
+                LIMIT $3
+            """, user_id, now, limit)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        log.error(f"❌ Ошибка получения событий календаря: {e}")
+        return []
+
+async def delete_calendar_event(user_id: int, event_id: int):
+    """Удаляет событие."""
+    if not _pool: return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("DELETE FROM calendar_events WHERE user_id = $1 AND id = $2", user_id, event_id)
+            return True
+    except Exception as e:
+        log.error(f"❌ Ошибка удаления события: {e}")
+        return False
 
 async def close_db():
     """Закрытие пула."""

@@ -22,6 +22,7 @@ from config import BOT_TOKEN, ADMIN_ID, DEFAULT_MODEL
 from groq_service import ai
 from image_service import image_gen
 from doc_service import doc_tool
+from calendar_service import calendar_service
 import database as db
 
 # Логирование
@@ -73,7 +74,7 @@ async def start_web_server():
 def main_keyboard():
     kb = [
         [KeyboardButton(text="🧠 Chat-модели"), KeyboardButton(text="🖼 Image-models")],
-        [KeyboardButton(text="🎭 Персонаж")],
+        [KeyboardButton(text="🎭 Персонаж"), KeyboardButton(text="📅 Календарь")],
         [KeyboardButton(text="🧹 Очистить память"), KeyboardButton(text="ℹ️ О модели")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -163,6 +164,13 @@ async def show_characters(message: Message):
         "• <b>Friend</b> — неформальный и душевный.",
         reply_markup=characters_keyboard()
     )
+
+@router.message(Command("calendar"))
+async def cmd_calendar(message: Message):
+    """Показывает расписание из внутреннего календаря."""
+    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    res = await calendar_service.list_events(message.from_user.id)
+    await message.answer(res)
 
 @router.message(F.text == "🖼 Image-модели")
 async def show_image_models(message: Message):
@@ -438,7 +446,9 @@ async def handle_document(message: Message):
 
 @router.message()
 async def chat_handler(message: Message):
-    if not message.text:
+    # Обработка кнопок меню
+    if message.text == "📅 Календарь":
+        await cmd_calendar(message)
         return
 
     # Проверка на запрос генерации картинки через текст
