@@ -3,6 +3,7 @@ import logging
 import httpx
 import json
 import base64
+import re
 import datetime
 from groq import AsyncGroq
 from config import GROQ_API_KEY, DEFAULT_MODEL
@@ -81,6 +82,20 @@ TOOLS = [
                 "required": ["path", "query"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_memory",
+            "description": "Saves a fact or preference about the user for long-term memory. Example: content='User prefers dark mode'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "The fact to remember."}
+                },
+                "required": ["content"]
+            }
+        }
     }
 ]
 
@@ -104,6 +119,12 @@ class GroqService:
         history, user_model, _ = await db.get_user_data(user_id)
         current_model = user_model or DEFAULT_MODEL
 
+        # Получаем Вечную Память
+        memories = await db.get_memories(user_id)
+        memory_context = ""
+        if memories:
+            memory_context = "\n\n[USER ETERNAL MEMORY]:\n" + "\n".join([f"- {m}" for m in memories])
+
         # Системный промпт для Агента
         system_prompt = {
             "role": "system", 
@@ -113,8 +134,10 @@ class GroqService:
                 "2. If the user asks for time/date, use 'get_current_time'. "
                 "3. For complex math, use 'calculate_math'. "
                 "4. To set a reminder, use 'add_reminder'. "
+                "5. To save a fact about user, use 'save_memory'. "
                 "Always answer in the language the user speaks to you. "
                 "CRITICAL: When using search results, ALWAYS provide clickable links (URLs) to the sources."
+                f"{memory_context}"
             )
         }
 
@@ -221,6 +244,9 @@ class GroqService:
                 ai_response = second_response.choices[0].message.content
             else:
                 ai_response = response_message.content
+
+            # Очистка ответа перед сохранением и возвратом
+            ai_response = self._clean_response(ai_response)
 
             history.append({"role": "assistant", "content": ai_response})
             await db.save_user_data(user_id, history)
@@ -364,8 +390,8 @@ class GroqService:
                 if remind_at < now:
                     remind_at += datetime.timedelta(days=1)
 
-            # Сохраняем в БД (в формате ISO)
-            await db.add_reminder(user_id, text, remind_at.isoformat())
+            # Сохраняем в БД (передаем объект datetime)
+            await db.add_reminder(user_id, text, remind_at)
             
             pretty_time = remind_at.strftime("%H:%M %d.%m.%Y")
             return f"✅ Напоминание установлено: '{text}' на {pretty_time}"
@@ -373,6 +399,15 @@ class GroqService:
         except Exception as e:
             log.error(f"Add Reminder Tool Error: {e}")
             return f"❌ Ошибка при установке напоминания: {str(e)}"
+
+    async def tool_save_memory(self, user_id: int, content: str) -> str:
+        """Инструмент для сохранения фактов в вечную память."""
+        try:
+            await db.add_memory(user_id, content)
+            return f"✅ Я запомнил: {content}"
+        except Exception as e:
+            log.error(f"Save Memory Tool Error: {e}")
+            return f"❌ Ошибка сохранения памяти: {str(e)}"
 
     async def transcribe_audio(self, audio_file_path: str) -> str:
         """Транскрибирует аудио через Groq Whisper."""
@@ -387,6 +422,16 @@ class GroqService:
         except Exception as e:
             log.error(f"Transcription Error: {e}")
             return f"❌ Ошибка транскрипции: {str(e)}"
+
+    def _clean_response(self, text: str) -> str:
+        """Очищает ответ от служебных тегов типа <think> и лишних переносов."""
+        if not text:
+            return ""
+        # Убираем содержимое тегов <think>...</think>
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+        # Убираем множественные переносы строк
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
 
 # Глобальный экземпляр
 ai = GroqService()

@@ -151,6 +151,12 @@ async def show_image_models(message: Message):
         reply_markup=image_models_keyboard()
     )
 
+@router.message(Command("forget"))
+async def cmd_forget(message: Message):
+    """Очищает вечную память пользователя."""
+    await db.clear_memories(message.from_user.id)
+    await message.answer("🧠 <b>Память очищена!</b> Я больше не помню факты о тебе.")
+
 @router.callback_query(F.data == "speak_last")
 async def process_speak_last(callback: CallbackQuery):
     """Озвучка последнего сообщения."""

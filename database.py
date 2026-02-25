@@ -57,6 +57,16 @@ async def init_db():
                 );
             """)
                 
+            # Таблица для "Вечной Памяти" (Eternal Memory)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_memories (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+                
             log.info("✅ Таблицы БД проверены/созданы.")
             
     except Exception as e:
@@ -122,10 +132,16 @@ async def clear_user_history(user_id: int):
     except Exception as e:
         log.error(f"❌ Ошибка очистки истории: {e}")
 
-async def add_reminder(user_id: int, text: str, remind_at: str):
+async def add_reminder(user_id: int, text: str, remind_at):
     """Добавляет напоминание в БД."""
     if not _pool: return
     try:
+        import datetime
+        # Если пришла строка, конвертируем в datetime
+        if isinstance(remind_at, str):
+            from dateutil import parser
+            remind_at = parser.parse(remind_at)
+
         async with _pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO reminders (user_id, text, remind_at) VALUES ($1, $2, $3)",
@@ -160,6 +176,44 @@ async def mark_reminder_done(reminder_id: int):
             )
     except Exception as e:
         log.error(f"❌ Ошибка обновления статуса напоминания: {e}")
+
+async def add_memory(user_id: int, content: str):
+    """Добавляет факт в вечную память."""
+    if not _pool: return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO user_memories (user_id, content) VALUES ($1, $2)",
+                user_id, content
+            )
+    except Exception as e:
+        log.error(f"❌ Ошибка добавления памяти: {e}")
+
+async def get_memories(user_id: int):
+    """Получает все факты из вечной памяти пользователя."""
+    if not _pool: return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT content FROM user_memories WHERE user_id = $1 ORDER BY created_at ASC",
+                user_id
+            )
+            return [row['content'] for row in rows]
+    except Exception as e:
+        log.error(f"❌ Ошибка получения памяти: {e}")
+        return []
+
+async def clear_memories(user_id: int):
+    """Очищает всю вечную память пользователя."""
+    if not _pool: return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM user_memories WHERE user_id = $1",
+                user_id
+            )
+    except Exception as e:
+        log.error(f"❌ Ошибка очистки памяти: {e}")
 
 async def close_db():
     """Закрытие пула."""
