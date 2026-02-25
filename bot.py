@@ -75,7 +75,8 @@ def main_keyboard():
     kb = [
         [KeyboardButton(text="🧠 Chat-модели"), KeyboardButton(text="🖼 Image-models")],
         [KeyboardButton(text="🎭 Персонаж"), KeyboardButton(text="📅 Календарь")],
-        [KeyboardButton(text="🧹 Очистить память"), KeyboardButton(text="ℹ️ О модели")]
+        [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🧹 Очистить память")],
+        [KeyboardButton(text="ℹ️ О модели")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -171,6 +172,42 @@ async def cmd_calendar(message: Message):
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
     res = await calendar_service.list_events(message.from_user.id)
     await message.answer(res)
+
+@router.message(F.text == "📊 Статистика")
+async def show_stats(message: Message):
+    """Показывает статистику потребления ресурсов."""
+    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    
+    usage = await db.get_user_usage(message.from_user.id)
+    if not usage:
+        await message.answer("📊 <b>Статистика пока пуста.</b> Пообщайтесь с ботом, чтобы появились данные!")
+        return
+
+    p_tokens = usage.get('prompt_tokens', 0)
+    c_tokens = usage.get('completion_tokens', 0)
+    total_tokens = p_tokens + c_tokens
+    cost = float(usage.get('total_cost', 0))
+
+    # Общая статистика бота (для админа)
+    admin_info = ""
+    if str(message.from_user.id) == str(ADMIN_ID):
+        total_stats = await db.get_stats()
+        admin_info = (
+            f"\n\n👑 <b>Global Stats (Admin Only):</b>\n"
+            f"👥 Users: <code>{total_stats.get('users', 0)}</code>\n"
+            f"🎞 Total Tokens: <code>{total_stats.get('tokens', 0):,}</code>\n"
+            f"💰 Total Cost: <code>${total_stats.get('cost', 0):.4f}</code>"
+        )
+
+    await message.answer(
+        f"📊 <b>Ваша статистика использования:</b>\n\n"
+        f"📥 Входящие токены: <code>{p_tokens:,}</code>\n"
+        f"📤 Исходящие токены: <code>{c_tokens:,}</code>\n"
+        f"🔢 Всего токенов: <code>{total_tokens:,}</code>\n"
+        f"💸 Примерная стоимость: <b>${cost:.4f}</b>"
+        f"{admin_info}",
+        parse_mode="HTML"
+    )
 
 @router.message(F.text == "🖼 Image-модели")
 async def show_image_models(message: Message):

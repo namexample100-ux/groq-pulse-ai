@@ -15,6 +15,17 @@ from calendar_service import calendar_service
 
 log = logging.getLogger(__name__)
 
+# Цены за 1М токенов (Input / Output) в USD
+PRICING = {
+    "llama-3.3-70b-versatile": (0.59, 0.79),
+    "llama-3.1-8b-instant": (0.05, 0.08),
+    "llama-3.2-11b-vision-preview": (0.18, 0.18),
+    "mixtral-8x7b-32768": (0.24, 0.24),
+    "qwen/qwen3-32b": (0.10, 0.10),
+    "meta-llama/llama-4-maverick-17b-128e-instruct": (0.15, 0.15),
+    "meta-llama/llama-4-scout-17b-16e-instruct": (0.15, 0.15),
+    "default": (0.10, 0.10)
+}
 # Определение инструментов (Tools) для агента
 TOOLS = [
     {
@@ -249,9 +260,12 @@ class GroqService:
                         tool_choice="auto",
                         temperature=0.7,
                     )
+                    current_model = "llama-3.1-8b-instant" # Update model for usage recording
                 else:
                     raise e
             
+            await self._record_usage(user_id, current_model, response.usage)
+
             response_message = response.choices[0].message
             tool_calls = response_message.tool_calls
 
@@ -342,8 +356,11 @@ class GroqService:
                             messages=history,
                             model="llama-3.1-8b-instant",
                         )
+                        current_model = "llama-3.1-8b-instant" # Update model for usage recording
                     else:
                         raise e
+                
+                await self._record_usage(user_id, current_model, second_response.usage)
                 ai_response = second_response.choices[0].message.content
             else:
                 ai_response = response_message.content
@@ -404,6 +421,10 @@ class GroqService:
                 messages=temp_history,
                 model="meta-llama/llama-4-scout-17b-16e-instruct",
             )
+            
+            # Записываем статистику (Economist)
+            await self._record_usage(user_id, "meta-llama/llama-4-scout-17b-16e-instruct", response.usage)
+            
             ai_response = response.choices[0].message.content
             
             # Сохраняем в историю только текст (без картинки, чтобы не раздувать БД)
@@ -435,10 +456,11 @@ class GroqService:
         history.append({"role": "system", "content": doc_info})
 
         try:
+            current_model = "llama-3.3-70b-versatile"
             try:
                 response = await self.client.chat.completions.create(
                     messages=history,
-                    model="llama-3.3-70b-versatile", # Для документов берем самую умную модель
+                    model=current_model, # Для документов берем самую умную модель
                 )
             except Exception as e:
                 if "rate_limit_exceeded" in str(e).lower():
@@ -447,9 +469,11 @@ class GroqService:
                         messages=history,
                         model="llama-3.1-8b-instant",
                     )
+                    current_model = "llama-3.1-8b-instant"
                 else:
                     raise e
             
+            await self._record_usage(user_id, current_model, response.usage)
             ai_response = response.choices[0].message.content
             
             # Сохраняем в историю подтверждение прочтения
@@ -584,6 +608,23 @@ class GroqService:
         except Exception as e:
             log.error(f"Transcription Error: {e}")
             return f"❌ Ошибка транскрипции: {str(e)}"
+
+    async def _record_usage(self, user_id: int, model: str, usage):
+        """Рассчитывает стоимость и сохраняет статистику в БД."""
+        if not usage: return
+        
+        p_tokens = usage.prompt_tokens
+        c_tokens = usage.completion_tokens
+        
+        # Получаем тарифы (defaults to 'default')
+        in_price, out_price = PRICING.get(model, PRICING["default"])
+        
+        # Расчет стоимости: (tokens / 1,000,000) * price
+        cost = (p_tokens / 1_000_000 * in_price) + (c_tokens / 1_000_000 * out_price)
+        
+        # Сохраняем в БД
+        await db.update_token_usage(user_id, p_tokens, c_tokens, cost)
+        log.info(f"📊 Usage: {p_tokens}+{c_tokens} tokens | Cost: ${cost:.6f}")
 
     def _clean_response(self, text: str) -> str:
         """Очищает ответ от служебных тегов типа <think> и лишних переносов."""

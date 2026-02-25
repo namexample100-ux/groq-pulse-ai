@@ -81,6 +81,17 @@ async def init_db():
                 );
             """)
 
+            # Таблица для Экономиста (подсчет токенов и стоимости)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    user_id BIGINT PRIMARY KEY,
+                    prompt_tokens BIGINT DEFAULT 0,
+                    completion_tokens BIGINT DEFAULT 0,
+                    total_cost NUMERIC(10, 6) DEFAULT 0,
+                    last_update TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             # Таблица для Google OAuth токенов
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS google_tokens (
@@ -247,14 +258,47 @@ async def get_stats():
             users_count = await conn.fetchval("SELECT COUNT(*) FROM chat_history")
             reminders_count = await conn.fetchval("SELECT COUNT(*) FROM reminders")
             memories_count = await conn.fetchval("SELECT COUNT(*) FROM user_memories")
+            total_tokens = await conn.fetchval("SELECT SUM(prompt_tokens + completion_tokens) FROM token_usage") or 0
+            total_cost = await conn.fetchval("SELECT SUM(total_cost) FROM token_usage") or 0
             return {
                 "users": users_count,
                 "reminders": reminders_count,
-                "memories": memories_count
+                "memories": memories_count,
+                "tokens": total_tokens,
+                "cost": float(total_cost)
             }
     except Exception as e:
         log.error(f"❌ Ошибка получения статистики: {e}")
         return {}
+
+async def update_token_usage(user_id: int, p_tokens: int, c_tokens: int, cost: float):
+    """Обновляет статистику использования токенов."""
+    if not _pool: return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO token_usage (user_id, prompt_tokens, completion_tokens, total_cost)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    prompt_tokens = token_usage.prompt_tokens + EXCLUDED.prompt_tokens,
+                    completion_tokens = token_usage.completion_tokens + EXCLUDED.completion_tokens,
+                    total_cost = token_usage.total_cost + EXCLUDED.total_cost,
+                    last_update = CURRENT_TIMESTAMP
+            """, user_id, p_tokens, c_tokens, cost)
+    except Exception as e:
+        log.error(f"❌ Ошибка обновления лимитов: {e}")
+
+async def get_user_usage(user_id: int):
+    """Получает статистику пользователя."""
+    if not _pool: return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM token_usage WHERE user_id = $1", user_id)
+            if row: return dict(row)
+            return {"prompt_tokens": 0, "completion_tokens": 0, "total_cost": 0}
+    except Exception as e:
+        log.error(f"❌ Ошибка получения статистики пользователя: {e}")
+        return None
 
 async def save_google_token(user_id: int, token_data: dict):
     """Сохраняет Google OAuth токен в БД."""
