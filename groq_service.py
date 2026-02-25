@@ -97,6 +97,20 @@ TOOLS = [
                 "required": ["content"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "summarize_channel",
+            "description": "Fetch and summarize the latest posts from a public Telegram channel. Example: channel_name='durov'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "channel_name": {"type": "string", "description": "The telegram channel username/ID (without @)."}
+                },
+                "required": ["channel_name"]
+            }
+        }
     }
 ]
 
@@ -224,8 +238,12 @@ class GroqService:
                     
                     elif function_name == "add_reminder":
                         tool_content = await self.tool_add_reminder(user_id, **function_args)
-                        log.info(f"� Агент ставит напоминание")
+                        log.info(f"📅 Агент ставит напоминание")
                     
+                    elif function_name == "summarize_channel":
+                        tool_content = await self.tool_summarize_channel(function_args.get("channel_name"))
+                        log.info(f"🔗 Агент читает канал: {function_args.get('channel_name')}")
+
                     elif function_name == "analyze_doc":
                         path = function_args.get("path")
                         query = function_args.get("query")
@@ -426,6 +444,37 @@ class GroqService:
         except Exception as e:
             log.error(f"Add Reminder Tool Error: {e}")
             return f"❌ Ошибка при установке напоминания: {str(e)}"
+
+    async def tool_summarize_channel(self, channel_name: int | str) -> str:
+        """Инструмент для суммаризации Telegram-канала."""
+        try:
+            url = f"https://t.me/s/{channel_name}"
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                resp = await client.get(url, timeout=10)
+                if resp.status_code != 200:
+                    return f"❌ Не удалось получить доступ к каналу @{channel_name} (Status: {resp.status_code})"
+                
+                html = resp.text
+                # Извлекаем текст сообщений (упрощенно через регулярки)
+                # Сообщения обычно в дивах с классом tgme_widget_message_text
+                messages = re.findall(r'<div class="tgme_widget_message_text[^>]*>(.*?)</div>', html, re.DOTALL)
+                
+                if not messages:
+                    return f"⚠️ В канале @{channel_name} не найдено текстовых сообщений (или канал приватный)."
+                
+                # Очищаем от HTML-тегов каждое сообщение
+                clean_messages = []
+                for msg in messages[-5:]: # Берем последние 5
+                    # Убираем теги <br/> и другие
+                    clean_text = re.sub(r'<[^>]+>', ' ', msg)
+                    clean_messages.append(clean_text.strip())
+                
+                context = "\n---\n".join(clean_messages)
+                return f"📝 Последние посты из канала @{channel_name}:\n\n{context}\n\nПожалуйста, проанализируй и кратко перескажи суть этих постов."
+
+        except Exception as e:
+            log.error(f"Summarize Channel Tool Error: {e}")
+            return f"❌ Ошибка при чтению канала: {str(e)}"
 
     async def tool_save_memory(self, user_id: int, content: str) -> str:
         """Инструмент для сохранения фактов в вечную память."""
