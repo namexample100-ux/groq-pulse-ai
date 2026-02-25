@@ -182,6 +182,7 @@ class GroqService:
             "6. To generate an image or drawing, use 'generate_image'.\n"
             "Always answer in the language the user speaks to you. "
             "If the user asks to draw, visualize, or show something, USE 'generate_image'. "
+            "IMPORTANT: When you receive input from voice transcription, be decisive and execute commands (like reminders or searches) immediately if requested."
             "CRITICAL: When using search results, ALWAYS provide clickable links (URLs) to the sources."
             f"{memory_context}"
         )
