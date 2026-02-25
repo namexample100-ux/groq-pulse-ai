@@ -7,8 +7,8 @@ log = logging.getLogger(__name__)
 
 class VoiceService:
     def __init__(self):
-        # Используем MMS model для русского языка
-        self.model_id = "facebook/mms-tts-rus"
+        # Используем MeloTTS - современная и качественная модель для русского языка
+        self.model_id = "myshell-ai/MeloTTS-Russian"
         # Используем актуальный Router API
         self.api_url = f"https://router.huggingface.co/hf-inference/models/{self.model_id}"
 
