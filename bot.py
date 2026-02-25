@@ -169,7 +169,7 @@ async def process_speak_last(callback: CallbackQuery):
     try:
         audio_bytes = await voice_service.text_to_speech(last_ai_msg)
         await callback.message.answer_voice(
-            voice=BufferedInputFile(audio_bytes, filename="voice.ogg"),
+            voice=BufferedInputFile(audio_bytes, filename="voice.mp3"),
             caption="🔊 <b>Озвучка сообщения</b>"
         )
     except Exception as e:
@@ -248,7 +248,7 @@ async def handle_voice(message: Message):
     try:
         # 1. Скачиваем файл
         file = await message.bot.get_file(message.voice.file_id)
-        file_name = f"voice_{message.from_user.id}_{message.message_id}.oga"
+        file_name = f"voice_{message.from_user.id}_{message.message_id}.ogg"
         file_path = os.path.join("tmp", file_name)
         
         if not os.path.exists("tmp"):
@@ -278,7 +278,7 @@ async def handle_voice(message: Message):
         try:
             audio_bytes = await voice_service.text_to_speech(response)
             await message.answer_voice(
-                voice=BufferedInputFile(audio_bytes, filename="answer.ogg"),
+                voice=BufferedInputFile(audio_bytes, filename="answer.mp3"),
                 caption="🔊 <b>Голосовой ответ</b>"
             )
         except Exception as tts_err:
