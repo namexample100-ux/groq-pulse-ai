@@ -16,7 +16,8 @@ import io
 from aiohttp import web
 from typing import Callable, Any, Awaitable
 
-from config import BOT_TOKEN, ADMIN_ID
+from voice_service import voice_service
+from config import BOT_TOKEN, ADMIN_ID, DEFAULT_MODEL
 from groq_service import ai
 from image_service import image_gen
 from doc_service import doc_tool
@@ -94,6 +95,10 @@ def image_models_keyboard():
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def speak_keyboard():
+    buttons = [[InlineKeyboardButton(text="🔊 Озвучить", callback_data="speak_last")]]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 # ── Хендлеры ────────────────────────────────────────────────────────────
 
 @router.message(CommandStart())
@@ -144,6 +149,32 @@ async def show_image_models(message: Message):
         "• <b>Animagine</b> — лучший аниме-арт.",
         reply_markup=image_models_keyboard()
     )
+
+@router.callback_query(F.data == "speak_last")
+async def process_speak_last(callback: CallbackQuery):
+    """Озвучка последнего сообщения."""
+    await callback.answer("⏳ Генерирую голос...")
+    
+    # Получаем последнее сообщение из БД
+    history, _, _ = await db.get_user_data(callback.from_user.id)
+    if not history:
+        await callback.message.answer("❌ История пуста.")
+        return
+    
+    last_ai_msg = next((m['content'] for m in reversed(history) if m['role'] == 'assistant'), None)
+    if not last_ai_msg:
+        await callback.message.answer("❌ Нечего озвучивать.")
+        return
+
+    try:
+        audio_bytes = await voice_service.text_to_speech(last_ai_msg)
+        await callback.message.answer_voice(
+            voice=BufferedInputFile(audio_bytes, filename="voice.ogg"),
+            caption="🔊 <b>Озвучка сообщения</b>"
+        )
+    except Exception as e:
+        log.error(f"TTS Callback Error: {e}")
+        await callback.message.answer(f"⚠️ Ошибка озвучки: {str(e)}")
 
 @router.callback_query(F.data.startswith("set_model_"))
 async def process_model_selection(callback: CallbackQuery):
@@ -209,7 +240,54 @@ async def cmd_img(message: Message):
         else:
             await message.answer(f"⚠️ <b>Произошла ошибка:</b>\n<code>{error_msg}</code>")
 
-@router.message(F.photo)
+@router.message(F.voice)
+async def handle_voice(message: Message):
+    """Обработка голосовых сообщений (STT)."""
+    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    
+    try:
+        # 1. Скачиваем файл
+        file = await message.bot.get_file(message.voice.file_id)
+        file_name = f"voice_{message.from_user.id}_{message.message_id}.oga"
+        file_path = os.path.join("tmp", file_name)
+        
+        if not os.path.exists("tmp"):
+            os.makedirs("tmp")
+
+        await message.bot.download_file(file.file_path, file_path)
+        
+        # 2. Транскрибируем
+        transcription = await ai.transcribe_audio(file_path)
+        
+        # Удаляем временный файл
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        if transcription.startswith("❌"):
+            await message.answer(transcription)
+            return
+
+        # 3. Отправляем в чат (опционально, чтобы пользователь видел текст)
+        await message.answer(f"🎤 <b>Вы сказали:</b>\n<i>{transcription}</i>")
+
+        # 4. Обрабатываем как обычный текст
+        response = await ai.get_response(message.from_user.id, transcription)
+        
+        # 5. Авто-озвучка ответа (Голос в Голос)
+        await message.bot.send_chat_action(chat_id=message.chat.id, action="record_voice")
+        try:
+            audio_bytes = await voice_service.text_to_speech(response)
+            await message.answer_voice(
+                voice=BufferedInputFile(audio_bytes, filename="answer.ogg"),
+                caption="🔊 <b>Голосовой ответ</b>"
+            )
+        except Exception as tts_err:
+            log.warning(f"Auto-TTS Error: {tts_err}")
+            await message.answer(response)
+
+    except Exception as e:
+        log.error(f"Voice Handler Error: {e}", exc_info=True)
+        await message.answer(f"⚠️ Ошибка при обработке голоса: {str(e)}")
 async def handle_photo(message: Message):
     """Обработка входящих фотографий (Зрение)."""
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
@@ -289,10 +367,13 @@ async def chat_handler(message: Message):
     
     # Отправляем ответ частями, если он слишком длинный (лимит TG ~4000 символов)
     if len(response) > 4000:
-        for i in range(0, len(response), 4000):
+        # Отправляем первую часть с кнопкой озвучки
+        await message.answer(response[0:4000], reply_markup=speak_keyboard())
+        for i in range(4000, len(response), 4000):
             await message.answer(response[i:i+4000])
     else:
-        await message.answer(response)
+        # Отправляем ответ с кнопкой озвучки
+        await message.answer(response, reply_markup=speak_keyboard())
 
 async def main():
     # Инициализация БД

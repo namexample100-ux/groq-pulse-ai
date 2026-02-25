@@ -301,5 +301,19 @@ class GroqService:
     async def set_model(self, user_id: int, model_name: str):
         await db.save_user_data(user_id, model_name=model_name)
 
+    async def transcribe_audio(self, audio_file_path: str) -> str:
+        """Транскрибирует аудио через Groq Whisper."""
+        try:
+            with open(audio_file_path, "rb") as file:
+                transcription = await self.client.audio.transcriptions.create(
+                    file=(audio_file_path, file.read()),
+                    model="whisper-large-v3",
+                    response_format="text",
+                )
+            return transcription
+        except Exception as e:
+            log.error(f"Transcription Error: {e}")
+            return f"❌ Ошибка транскрипции: {str(e)}"
+
 # Глобальный экземпляр
 ai = GroqService()
